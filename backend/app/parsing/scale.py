@@ -13,17 +13,6 @@ from typing import List, Dict, Any
 # Scale patterns from text spans
 # ---------------------------------------------------------------------------
 
-ARCHITECTURAL_SCALES = [
-    r"\b(1(:\d+)?|1/4|1/2|1/8)\"=1'-0\"\b",   # e.g. 1/4\"=1'-0\", 1:100
-    r"\bSCALE\s+1=1\b",                         # plain "SCALE 1=1"
-    r"\bDRAWING.SCALE\s+1:100\b",               # "DRAWING.SCALE 1:100"
-    r"\b1:\d+\b",                                # e.g. 1:100, 1:50, 1:200
-    # Electrical-specific patterns
-    r"\bELECTRICAL.SCALE\s+1:\d+\b",             # "ELECTRICAL.SCALE 1:100"
-    r"\bSCALE\s+1=\d+'\''-0\"\b",               # "SCALE 1=100'-0\""
-]
-
-
 def detect_scale(
     text_spans: List[Dict[str, Any]],
     default: str = "1:100",
@@ -45,10 +34,10 @@ def detect_scale(
         if not text:
             continue
 
-        # Pattern 1: Architectural scales "1/4\"=1'-0\" or "1:100"
-        for pattern in ARCHITECTURAL_SCALES:
+        # Pattern 1: Electrical-specific scales (must have group)
+        for pattern in _ELECTRICAL_SCALES:
             m = re.search(pattern, text)
-            if m:
+            if m and m.group(1):
                 return m.group(1)
 
         # Pattern 2: Generic "1:N" ratio
@@ -58,6 +47,23 @@ def detect_scale(
 
     # No scale found in text — return default but caller must handle
     return default
+
+
+# ---------------------------------------------------------------------------
+# Internal pattern lists with guaranteed capturing groups
+# ---------------------------------------------------------------------------
+
+# Electrical-specific scales (always have capturing group 1 = the scale value)
+_ELECTRICAL_SCALES = [
+    r"\bELECTRICAL\.SCALE\s+(1:\d+)\b",        # "ELECTRICAL.SCALE 1:100"
+    r"\bSCALE\s+1=(\d+)'\''-0\"\b",             # "SCALE 1=100'-0\"" → "100"
+]
+
+# Architectural scales (always have capturing group 1 = the scale value)
+_ARCHITECTURAL_SCALES = [
+    r"\b(1/4|1/2|1/8)\"=1'-0\"\b",             # e.g. 1/4\"=1'-0\"
+    r"\b(1:\d+)\b",                             # e.g. 1:100, 1:50, 1:200
+]
 
 
 # ---------------------------------------------------------------------------

@@ -46,7 +46,7 @@ Status legend: ⬜ not started · 🟦 in progress · ✅ done
 
 *Phase 1.5 MVP proven off sample sheet `MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf`. Raster fallback is not required for MVP (Phase 1) but is the natural continuation for scanned PDF support.*
 
-## Phase 2 — Full Electrical discipline 🟦
+## Phase 2 — Full Electrical discipline ✅
 
 **Goal:** Extend the AEC Blueprint Intelligence System to process full electrical construction drawings, producing a complete Bill of Quantities (BOQ) for lighting, power, switches, distribution boards, cable trays, and conduit. The electrical discipline follows the same vector-first, rules-driven, human-verified architecture established in Phase 1.
 
@@ -90,7 +90,29 @@ Status legend: ⬜ not started · 🟦 in progress · ✅ done
 
 **DoD:** A second real electrical sheet estimated end-to-end; catalogs editable without code changes; every BOQ number clickable to its source region; confidence tiering (MEASURED/DERIVED/ASSUMED) on all items.
 
-*Phase 2 planning complete. Implementation in progress — vector pipeline extended for electrical layers.*
+### 2.3 What's Now Implemented (Phase 2 Complete):
+
+- **Layer mapping** (`data/layer_mapping.yaml` + `app/parsing/layer_map.py`):
+  - Data-driven mapping of sheet OCG/layer names → assembly rule names (trap: rules driven by YAML, never hardcoded)
+  - Covers the real sample-sheet layers (`E-lt-fix-nm-clg`, `NORMAL TRAY`, `access control`, …)
+- **Vector geometry fix** (`app/ingestion/vector.py`):
+  - PyMuPDF ≥1.24 `get_drawings()` uses `rect` + `items` (not legacy `bbox`/`path`) — extraction now reads real coordinates
+  - Clustering iterates all mapped layers, not a hardcoded list
+- **Route measurement fix** (`app/parsing/routes.py`):
+  - Polylines rebuilt from `items` geometry; routes resolve via the layer mapping
+- **Discrete component counting** (`app/parsing/components.py`):
+  - DBSCAN clusters → one component instance per symbol, each traceable to `source_path_ids`, confidence `MEASURED`
+- **E2E endpoint** (`app/e2e/router.py`):
+  - Full pipeline: classify → parse → scale → routes (length-based BOQ) + components (count-based BOQ)
+  - No hardcoded prices: unpriced items flagged for review (never $0)
+- **Catalog import endpoint** (`app/catalog/router.py`):
+  - `POST /api/catalog/import` commits imported rows (was silently rolling back)
+  - Prices returned as numbers, not `Decimal` strings
+- **Regression suite**: 10/10 Phase 2 tests green, including real pipeline run on the sample sheet (T1, T10) and API-level import proof (T9)
+
+**DoD:** A second real electrical sheet estimated end-to-end; catalogs editable without code changes; every BOQ number clickable to its source region; confidence tiering (MEASURED/DERIVED/ASSUMED) on all items.
+
+*Phase 2 implementation complete — regression suite (10/10) green.*
 
 ## Phase 3 — Mechanical (HVAC)
 

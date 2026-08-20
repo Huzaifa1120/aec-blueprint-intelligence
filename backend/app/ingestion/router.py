@@ -37,7 +37,7 @@ def classify_upload(file_path: str) -> dict:
 
         drawings = page.get_drawings()
         images = page.get_images(full=True)
-        ocgs = page.get_ocgs()
+        ocgs = doc.get_ocgs()
         ocg_names = [v.get("name", "") for v in ocgs.values()]
         has_text = page.get_text("text").strip() != ""
 

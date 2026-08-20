@@ -26,7 +26,8 @@ from sklearn.cluster import DBSCAN
 class DrawingPath(TypedDict):
     id: str
     type: str  # "path", "rect", "circle", "line"
-    path: object | None  # svg.path.Path
+    path: object | None  # legacy svg.path.Path — unused in pymupdf ≥1.24
+    items: List[tuple]  # raw geometry items from get_drawings(): ('l', p1, p2), ...
     bbox: Tuple[float, float, float, float]  # (x0, y0, x1, y1)
     layer: str | None
     color: str | None
@@ -64,19 +65,28 @@ def extract_drawings(page: pymupdf.Page) -> List[DrawingPath]:
 
     Returns list of dicts keyed by the DrawingPath schema.
     Critical attribute: `layer` — used for DBSCAN clustering later.
+
+    Note: PyMuPDF ≥1.24 exposes geometry as `items` (list of ('l', p1, p2) /
+    ('c', ...) / ('qu', ...) tuples) and the bbox as `rect`. The legacy
+    `path` (svg.path.Path) field no longer exists — we keep the key for
+    backward compatibility but populate `items` for route measurement.
     """
     drawings = page.get_drawings()
     result: List[DrawingPath] = []
 
     for i, drawing in enumerate(drawings):
+        rect = drawing.get("rect")
+        bbox = tuple(rect) if rect is not None else (0.0, 0.0, 0.0, 0.0)
+
         d: DrawingPath = {
             "id": str(uuid.uuid4()),
             "type": drawing.get("type", "path"),
-            "path": drawing.get("path"),  # svg.path.Path or None
-            "bbox": drawing.get("bbox", (0.0, 0.0, 0.0, 0.0)),
+            "path": None,
+            "items": drawing.get("items", []),
+            "bbox": bbox,
             "layer": drawing.get("layer"),
             "color": drawing.get("color"),
-            "fill_color": drawing.get("fill_color"),
+            "fill_color": drawing.get("fill"),
             "width": drawing.get("width", 1.0),
             "page_number": page.number + 1,  # 1-indexed
         }
@@ -125,7 +135,7 @@ def build_ocg_registry(doc: pymupdf.Document) -> Dict[str, Dict]:
     ocgs = doc.get_ocgs()
     registry: Dict[str, Dict] = {}
 
-    for ocg in ocgs:
+    for ocg in ocgs.values():
         name = ocg.get("name", "Unknown")
         registry[name] = {
             "ocg": ocg.get("ocg"),
@@ -302,26 +312,25 @@ def parse_pdf(pdf_path: str) -> dict:
         # Detect scale
         scale = detect_scale(all_text_spans, default="1:100")
 
-        # Cluster layers — access control (MVP focus) + electrical layers
+        # Cluster layers — access control (MVP focus) + electrical layers.
+        # Layer set is data-driven via the layer mapping (data/layer_mapping.yaml)
+        # plus the legacy Phase 1 access-control names, so a new sheet's layer
+        # names cluster without source changes.
+        from app.parsing.layer_map import all_mapped_layers
+
         ac_layer_names = ("AC", "ACCESS_CONTROL", "SECURITY", "CARD_READER")
-        electrical_layer_names = (
-            "LIGHTING",
-            "POWER",
-            "SWITCHES",
-            "CONDUIT",
-            "CABLE_TRAY",
-            "DISTRIBUTION_BOARD",
-            "AC",
-            "GROUND",
-        )
+        layer_names = list(all_mapped_layers()) + list(ac_layer_names)
+        # De-duplicate while preserving order.
+        seen: set[str] = set()
+        unique_layers: list[str] = []
+        for name in layer_names:
+            if name not in seen:
+                seen.add(name)
+                unique_layers.append(name)
+
         clusters: List[ClusterResult] = []
 
-        for layer_name in ac_layer_names:
-            layer_clusters = cluster_paths(all_drawings, layer_name, eps=5.0, min_pts=2)
-            clusters.extend(layer_clusters)
-
-        # Cluster electrical layers
-        for layer_name in electrical_layer_names:
+        for layer_name in unique_layers:
             layer_clusters = cluster_paths(all_drawings, layer_name, eps=5.0, min_pts=2)
             clusters.extend(layer_clusters)
 

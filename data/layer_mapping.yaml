@@ -1,0 +1,49 @@
+# Layer-name → assembly-type mapping for vector parsing.
+#
+# Maps the OCG/layer names found on construction PDFs to the canonical
+# assembly rule names in data/assemblies/*.yaml. Adding a new discipline or
+# a new vendor's layer naming requires editing THIS FILE ONLY — never source.
+#
+# Trap compliance:
+# - Rules are data-driven (YAML), never hardcoded in source (AGENTS.md §3).
+# - Mapping is a rule, not a geometry calculation; humans approve it.
+layer_mapping:
+  - assembly: lighting_outlet
+    layers:
+      - E-lt-fix-nm-clg
+      - LIGHTING
+      - LIGHTING FIXTURES
+      - LIGHT
+  - assembly: switch
+    layers:
+      - SWITCHES
+      - SWITCH
+  - assembly: socket_outlet
+    layers:
+      - SOCKET
+      - SOCKET_OUTLET
+      - SOCKETS
+  - assembly: power_outlet
+    layers:
+      - POWER
+      - POWER_OUTLET
+  - assembly: distribution_board
+    layers:
+      - DISTRIBUTION_BOARD
+      - DB
+  - assembly: access_control_door
+    layers:
+      - access control
+      - ACCESS_CONTROL
+      - AC
+      - SECURITY
+      - CARD_READER
+  - assembly: cable_tray
+    layers:
+      - NORMAL TRAY
+      - CABLE_TRAY
+      - CABLE TRAY
+  - assembly: conduit
+    layers:
+      - CONDUIT
+      - CONDUIT_RUN

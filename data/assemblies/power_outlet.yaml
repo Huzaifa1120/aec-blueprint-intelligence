@@ -1,0 +1,9 @@
+bom:
+  power_outlet: 1
+labor:
+  category: electrical
+  hourly_rate: 45.0
+  installation_hours: 0.3
+name: power_outlet
+rule_version: 1.0.0
+waste_factor: 0.1
