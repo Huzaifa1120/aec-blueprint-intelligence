@@ -22,7 +22,7 @@ from app.db.base import Base, SessionLocal
 # YAML rule set loading
 # ---------------------------------------------------------------------------
 
-_ASSEMBLIES_DIR = Path(__file__).resolve().parents[2] / "data" / "assemblies"
+_ASSEMBLIES_DIR = Path(__file__).resolve().parents[3] / "data" / "assemblies"
 
 
 def load_assembly_rule(name: str) -> Optional[Dict]:

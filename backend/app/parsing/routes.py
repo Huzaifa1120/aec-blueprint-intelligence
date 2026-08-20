@@ -13,7 +13,7 @@ Constraints:
 from __future__ import annotations
 
 import uuid
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, TypedDict
 
 import pymupdf  # always import pymupdf, never fitz
 

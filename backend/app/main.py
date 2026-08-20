@@ -18,7 +18,11 @@ app.add_middleware(
 )
 
 # Include catalog API router (Phase 2: spreadsheet import + material listing)
-app.include_router(catalog_router, prefix="/api/catalog", tags=["catalog"])
+app.include_router(catalog_router)
+
+# Include E2E pipeline router (Phase 2)
+from app.e2e.router import router as e2e_router
+app.include_router(e2e_router)
 
 
 @app.get("/")
