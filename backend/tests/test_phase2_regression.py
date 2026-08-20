@@ -56,10 +56,47 @@ def test_component_counts_from_electrical_sheet():
     against human count. Tolerance: ±5% for automated counts (clustering tolerance).
 
     Trap reference: AGENTS.md §2 — Geometry calculates, no LLM output of final quantities.
+
+    This gate runs the deterministic vector pipeline against the real electrical
+    sample sheet and asserts that counts are (a) non-zero for the sheet's mapped
+    layers, (b) stable across repeated runs (deterministic), and (c) traceable to
+    source path IDs. The exact counts are surfaced for human verification, per the
+    "AI proposes, humans approve" rule.
     """
-    # TODO: Integrate full E2E pipeline once vector parsing for electrical layers is wired.
-    # For now, validate the test structure and import logic work.
-    assert True  # Placeholder — validated by E2E integration
+    from app.ingestion.vector import parse_pdf
+    from app.parsing.components import count_components, component_totals
+
+    sample = (
+        Path(__file__).resolve().parents[2]
+        / "data"
+        / "samples"
+        / "MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf"
+    )
+    assert sample.exists(), f"Sample fixture missing: {sample}"
+
+    parsed = parse_pdf(str(sample))
+    assert parsed["drawing_count"] > 10000, "Expected a real vector sheet"
+
+    components = count_components(parsed["clusters"], parsed["raw_drawings"])
+    totals = component_totals(components)
+
+    # Non-zero: the sheet has lighting fixtures on a mapped layer.
+    assert totals.get("lighting_outlet", 0) > 0, "Expected lighting fixtures on the sheet"
+
+    # Every emitted component must map to a YAML assembly rule.
+    from app.assembly.rules import load_assembly_rule
+
+    for comp in components:
+        rule = load_assembly_rule(comp["assembly_type"])
+        assert rule is not None, f"Assembly rule missing for {comp['assembly_type']}"
+        assert comp["confidence_status"] == "MEASURED"
+        assert len(comp["source_path_ids"]) >= 1, "Each component must be traceable"
+
+    # Determinism: re-running the same pure pipeline gives identical counts.
+    totals_again = component_totals(
+        count_components(parsed["clusters"], parsed["raw_drawings"])
+    )
+    assert totals_again == totals, "Component counts must be deterministic"
 
 
 # ──────────────────────────────────────────────
@@ -294,9 +331,10 @@ def test_unpriced_flag_never_substitutes_zero(db_session):
 
     # Verify unpriced item is distinguishable from a priced item
     # (a priced item should have unpriced=False and total_cost > 0 when priced)
+    ingest_material_price(db_session, "Conduit", 3.00, source="test_unpriced")
     boq_priced = compute_boq_item(10.0, "Conduit", db_session)
     assert boq_priced["unpriced"] is False, "Priced material should have unpriced=False"
-    assert boq_priced["total_cost"] > 0, "Priced material should have positive total_cost"
+    assert boq_priced["total_cost"] == 30.0, "Priced material should have positive total_cost"
 
 
 # ──────────────────────────────────────────────
@@ -342,3 +380,102 @@ def test_labor_rates_affect_boq_calculations(db_session):
     # Verify total_cost function with material + labor
     total = total_cost(30.0, 90.0, 10.0, 2.0, 5.0)
     assert total == 137.0, f"Expected 137.0, got {total}"
+
+
+# ──────────────────────────────────────────────
+# T9: test_catalog_import_endpoint_updates_prices
+# ──────────────────────────────────────────────
+
+def test_catalog_import_endpoint_updates_prices(tmp_path, monkeypatch):
+    """Phase 2 DoD: catalogs editable without code changes via POST /api/catalog/import.
+
+    Uploads a CSV of material prices through the public API endpoint and verifies
+    the new prices appear in the catalog listing and drive BOQ computation.
+
+    Trap reference: AGENTS.md §5, §7 — Catalog editability without code changes.
+    """
+    from sqlalchemy import create_engine
+
+    from app.core.config import Settings
+    from app.db.base import Base
+
+    db_path = tmp_path / "test_catalog_api.db"
+    test_settings = Settings(database_url=f"sqlite:///{db_path}")
+    monkeypatch.setattr("app.catalog.router.get_settings", lambda: test_settings)
+
+    engine = create_engine(test_settings.database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    csv_content = (
+        "material_name,unit,unit_price,category,source\n"
+        "Conduit,m,2.50,electrical,test_import\n"
+        "Cable Tray Section,m,1.80,electrical,test_import\n"
+    )
+    resp = client.post(
+        "/api/catalog/import",
+        files={"file": ("prices.csv", csv_content.encode("utf-8"), "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["successful"] == 2, f"Expected 2 rows imported, got {body}"
+    assert body["failed"] == 0, f"Expected 0 failures, got {body}"
+
+    resp = client.get("/api/catalog/")
+    materials = resp.json()
+    names = [m["name"] for m in materials]
+    assert "Conduit" in names, "Imported material should appear in catalog listing"
+    conduit = next(m for m in materials if m["name"] == "Conduit")
+    assert conduit["latest_unit_price"] == 2.5, "Imported price should be reflected"
+
+
+# ──────────────────────────────────────────────
+# T10: test_e2e_pipeline_endpoint_on_sample
+# ──────────────────────────────────────────────
+
+def test_e2e_pipeline_endpoint_on_sample(tmp_path, monkeypatch):
+    """Phase 2 DoD: full PDF → BOQ pipeline runs end-to-end on the sample sheet.
+
+    Uploads the real electrical sample through POST /api/e2e/run and verifies
+    the deterministic pipeline returns measured components and BOQ items, each
+    with a discrete confidence tier and source-path traceability.
+
+    Trap reference: AGENTS.md §4 — Full deterministic trail traceability.
+    """
+    from sqlalchemy import create_engine
+
+    from app.db.base import Base
+
+    sample = (
+        Path(__file__).resolve().parents[2]
+        / "data"
+        / "samples"
+        / "MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf"
+    )
+    assert sample.exists()
+
+    db_path = tmp_path / "test_e2e_api.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    Base.metadata.create_all(engine)
+    engine.dispose()
+    monkeypatch.setattr(
+        "app.e2e.router.get_engine",
+        lambda: create_engine(f"sqlite:///{db_path}"),
+    )
+
+    with open(sample, "rb") as fh:
+        resp = client.post(
+            "/api/e2e/run",
+            files={"file": ("sample.pdf", fh, "application/pdf")},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "ok", f"Pipeline failed: {body}"
+    assert body["components_found"] > 0, "Expected discrete components on the sheet"
+    assert len(body["boq_items"]) > 0, "Expected BOQ items from the pipeline"
+
+    for item in body["boq_items"]:
+        assert item["confidence_status"] in ("MEASURED", "DERIVED", "ASSUMED"), (
+            "Every BOQ item must have a discrete confidence tier"
+        )
+        assert item["source_path_ids"], "Every BOQ item must be clickable to source"

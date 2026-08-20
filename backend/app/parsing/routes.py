@@ -118,6 +118,57 @@ def extract_polyline_from_path(
         return []
 
 
+def extract_polyline_from_items(
+    items: List[tuple],
+) -> List[Tuple[float, float]]:
+    """Extract ordered vertex points from PyMuPDF ``get_drawings()`` items.
+
+    Item format (PyMuPDF ≥1.24): a tuple whose first element is the
+    operation type, followed by the operand points:
+      - ('l', p1, p2)          line segment
+      - ('c', p1, p2, p3)      cubic Bézier (we sample the endpoints)
+      - ('qu', p1, p2, p3)     quadratic Bézier (we sample the endpoints)
+      - ('re', rect)           rectangle
+
+    We flatten to a simple ordered polyline for length measurement.
+    """
+    points: List[Tuple[float, float]] = []
+
+    def _point(v) -> Optional[Tuple[float, float]]:
+        if isinstance(v, complex):
+            return (v.real, v.imag)
+        if isinstance(v, (list, tuple)) and len(v) == 2:
+            return (float(v[0]), float(v[1]))
+        # pymupdf.Point / Rect are iterable too
+        try:
+            xy = tuple(v)
+            if len(xy) >= 2:
+                return (float(xy[0]), float(xy[1]))
+        except (TypeError, ValueError):
+            return None
+        return None
+
+    for item in items:
+        if not isinstance(item, tuple) or not item:
+            continue
+        op = item[0]
+        if op == "re":
+            # Rectangle: emit the four corners
+            rect = item[1]
+            try:
+                x0, y0, x1, y1 = tuple(rect)[:4]
+            except (TypeError, ValueError):
+                continue
+            points.extend([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
+        else:
+            for operand in item[1:]:
+                pt = _point(operand)
+                if pt is not None:
+                    points.append(pt)
+
+    return points
+
+
 def measure_routes(
     clusters: List[Dict],
     raw_drawings: List[Dict],
@@ -164,7 +215,11 @@ def measure_routes(
         for mid in member_ids:
             path_dict = path_lookup.get(mid, {})
             path_obj = path_dict.get("path")
-            part = extract_polyline_from_path(path_obj)
+            items = path_dict.get("items")
+            if items:
+                part = extract_polyline_from_items(items)
+            else:
+                part = extract_polyline_from_path(path_obj)
             polyline_parts.extend(part)
 
         if len(polyline_parts) < 2:
