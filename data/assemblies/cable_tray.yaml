@@ -1,0 +1,11 @@
+name: cable_tray
+rule_version: "1.0.0"
+bom:
+  cable_tray_section: 1.0
+  tray_fitting: 0.2
+  support_hanger: 0.1
+labor:
+  installation_hours: 1.5
+  hourly_rate: 45.00
+  category: electrical
+waste_factor: 0.10

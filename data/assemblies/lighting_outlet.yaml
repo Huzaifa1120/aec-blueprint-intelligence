@@ -1,0 +1,11 @@
+name: lighting_outlet
+rule_version: "1.0.0"
+bom:
+  lighting_unit: 1.0
+  lampholder: 1.0
+  wiring: 0.4
+labor:
+  installation_hours: 0.3
+  hourly_rate: 45.00
+  category: electrical
+waste_factor: 0.10

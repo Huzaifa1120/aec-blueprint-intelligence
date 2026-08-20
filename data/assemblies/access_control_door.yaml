@@ -1,0 +1,10 @@
+name: access_control_door
+rule_version: "1.0.0"
+bom:
+  card_reader: 1
+  magnetic_lock: 1
+  push_button: 1
+  door_controller: 0.5
+labor:
+  installation_hours: 2.5
+waste_factor: 0.10

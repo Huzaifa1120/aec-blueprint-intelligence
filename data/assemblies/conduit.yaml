@@ -1,0 +1,11 @@
+name: conduit
+rule_version: "1.0.0"
+bom:
+  conduit_pipe: 1.0
+  conduit_fitting: 0.05
+  clamp: 0.1
+labor:
+  installation_hours: 2.0
+  hourly_rate: 45.00
+  category: electrical
+waste_factor: 0.10

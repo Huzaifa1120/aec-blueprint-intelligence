@@ -1,0 +1,13 @@
+name: distribution_board
+rule_version: "1.0.0"
+bom:
+  panel_board: 1.0
+  disconnect_switch: 1.0
+  circuit_breakers: 12.0
+  busbars: 1.0
+  terminal_blocks: 24.0
+labor:
+  installation_hours: 8.0
+  hourly_rate: 45.00
+  category: electrical
+waste_factor: 0.15
