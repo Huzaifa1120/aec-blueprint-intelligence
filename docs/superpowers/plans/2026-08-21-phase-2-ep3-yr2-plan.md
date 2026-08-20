@@ -44,7 +44,7 @@
 - Consumes: `POST /api/e2e/run` (FastAPI TestClient `client` already defined at module level); `app.e2e.router.get_engine` (monkeypatched, same pattern as T10); `app.assembly.rules.load_assembly_rule(name) -> Optional[Dict]`; sample fixture path `Path(__file__).resolve().parents[2] / "data" / "samples" / "MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf"`.
 - Produces: a passing test function proving gates E1–E9 of the spec.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `backend/tests/test_phase2_regression.py`:
 
@@ -136,29 +136,29 @@ def test_ep3_e2e_pipeline_validation_on_sample(tmp_path, monkeypatch):
     assert len(body_again["boq_items"]) == len(body["boq_items"])
 ```
 
-- [ ] **Step 2: Run the test to see it fail (red)**
+- [x] **Step 2: Run the test to see it fail (red)**
 
 Run from `backend/`:
 `python -m pytest tests/test_phase2_regression.py::test_ep3_e2e_pipeline_validation_on_sample -v`
 Expected: PASS on the first run is not the point — the test must exist and run. If it PASSES immediately, the gate was already effectively met and the assertion suite now locks it in. If it FAILS, proceed to Step 3.
 
-- [ ] **Step 3: If the test fails, fix the smallest production surface**
+- [x] **Step 3: If the test fails, fix the smallest production surface**
 
 Investigate the failing gate with `python -m pytest tests/test_phase2_regression.py::test_ep3_e2e_pipeline_validation_on_sample -v` and fix only the file implicated (e.g. `app/parsing/components.py`, `app/parsing/routes.py`, `app/parsing/scale.py`, `app/e2e/router.py`, `data/layer_mapping.yaml`). Re-run the test until green. Record what was fixed in the commit message.
 
-- [ ] **Step 4: Run the full Phase 2 suite to verify no regressions**
+- [x] **Step 4: Run the full Phase 2 suite to verify no regressions**
 
 Run from `backend/`:
 `python -m pytest tests/test_phase2_regression.py -q`
 Expected: all tests pass (10 existing + EP3).
 
-- [ ] **Step 5: Lint the changed files**
+- [x] **Step 5: Lint the changed files**
 
 Run from `backend/`:
 `python -m ruff check app tests`
 Expected: no new violations. (Pre-existing F401/F821/F841 in unrelated Phase 1/1.5 files are out of scope.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/tests/test_phase2_regression.py
@@ -177,7 +177,7 @@ git commit -m "feat: add EP3 E2E pipeline validation test on sample sheet"
 - Consumes: `app.assembly.rules.persist_assembly_to_db(rule_name: str, project_id, session) -> Optional[Assembly]`; `app.assembly.rules.load_assembly_rule(name) -> Optional[Dict]`; SQLAlchemy models `Assembly`, `Material`, `AssemblyMaterial`; existing `db_session` fixture (in-memory SQLite).
 - Produces: a passing test proving gates Y1–Y5 of the spec.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `backend/tests/test_phase2_regression.py`:
 
@@ -243,25 +243,25 @@ def test_yaml_rule_persistence_to_db(db_session):
     assert len(links2) == len(links), "Links must not duplicate on re-persist"
 ```
 
-- [ ] **Step 2: Run the test to verify it passes (or fails, then fix)**
+- [x] **Step 2: Run the test to verify it passes (or fails, then fix)**
 
 Run from `backend/`:
 `python -m pytest tests/test_phase2_regression.py::test_yaml_rule_persistence_to_db -v`
 Expected: PASS. If it FAILS, the bug is in `persist_assembly_to_db` (`backend/app/assembly/rules.py:123`) — fix the smallest surface (e.g. duplicate-link guard, labor link) and re-run until green.
 
-- [ ] **Step 3: Run the full Phase 2 suite**
+- [x] **Step 3: Run the full Phase 2 suite**
 
 Run from `backend/`:
 `python -m pytest tests/test_phase2_regression.py -q`
 Expected: all pass (10 existing + EP3 + YR2).
 
-- [ ] **Step 4: Lint the changed files**
+- [x] **Step 4: Lint the changed files**
 
 Run from `backend/`:
 `python -m ruff check app tests`
 Expected: no new violations.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/tests/test_phase2_regression.py
@@ -279,17 +279,17 @@ git commit -m "feat: add YR2 persist_assembly_to_db persistence test"
 - Consumes: the moved remaining-work plan (formerly `docs/phase2_plan.md`), which lists EP3 as `[skip]` and YR2 as `[ ]`.
 - Produces: a plan doc reflecting EP3 + YR2 complete; a note that nothing in Phase 2 is skipped.
 
-- [ ] **Step 1: Update the plan checkboxes**
+- [x] **Step 1: Update the plan checkboxes**
 
 In `docs/superpowers/plans/2026-08-21-phase-2-remaining-plan.md`:
 - Change the EP3 line from `[skip]` / `[ ]` to `- [x] **EP3** – E2E pipeline validation with sample PDF (implemented as `test_ep3_e2e_pipeline_validation_on_sample`, green).`
 - Change the YR2 line from `[ ]` to `- [x] **YR2** – `persist_assembly_to_db` test coverage (implemented as `test_yaml_rule_persistence_to_db`, green).`
 
-- [ ] **Step 2: Verify the plan reflects no skipped items**
+- [x] **Step 2: Verify the plan reflects no skipped items**
 
 Read the plan and confirm no `[skip]` or unchecked Phase 2 task remains.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/superpowers/plans/2026-08-21-phase-2-remaining-plan.md
@@ -307,19 +307,19 @@ git commit -m "docs: mark EP3 + YR2 complete in Phase 2 remaining plan"
 - Consumes: all Task 1–3 commits on the feature branch.
 - Produces: green `dev` and `main` with Phase 2 fully complete.
 
-- [ ] **Step 1: Run the full backend test suite (Phase 2 files)**
+- [x] **Step 1: Run the full backend test suite (Phase 2 files)**
 
 Run from `backend/`:
 `python -m pytest tests/test_phase2_regression.py -q`
 Expected: all pass.
 
-- [ ] **Step 2: Lint**
+- [x] **Step 2: Lint**
 
 Run from `backend/`:
 `python -m ruff check app tests`
 Expected: no new violations in changed files.
 
-- [ ] **Step 3: Merge feature into `dev` and push**
+- [x] **Step 3: Merge feature into `dev` and push**
 
 ```bash
 git checkout dev
@@ -327,7 +327,7 @@ git merge --no-ff <feature-branch> -m "merge: phase2 EP3+YR2 completion into dev
 git push -u origin dev
 ```
 
-- [ ] **Step 4: Merge `dev` into `main` and push**
+- [x] **Step 4: Merge `dev` into `main` and push**
 
 ```bash
 git checkout main
@@ -335,7 +335,7 @@ git merge --no-ff dev -m "merge: dev into main for production release"
 git push -u origin main
 ```
 
-- [ ] **Step 5: Confirm sync**
+- [x] **Step 5: Confirm sync**
 
 `git status` → working tree clean; `git rev-parse main origin/main dev origin/dev` → identical SHAs.
 
