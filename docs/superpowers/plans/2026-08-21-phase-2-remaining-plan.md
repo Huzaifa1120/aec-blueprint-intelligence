@@ -36,11 +36,12 @@
 
 - [x] **EP1** – Spreadsheet import endpoint implemented and tested (see `POST /api/catalog/import` smoke test).
 - [x] **EP2** – E2E pipeline endpoint implemented and tested (see `POST /api/e2e/run` smoke test with sample PDF).
-- [skip] **EP3** – E2E pipeline validation with sample PDF (skipped per user request; full end-to-end PDF validation not run).
-- [ ] **RT1** – Component‑count test (plan marked complete; actual test body pending pytest green verification).
-- [ ] **RT2** – E2E pipeline integration test (plan marked complete; actual test body pending pytest green verification).
-- [ ] **RT3** – BOQ clickability test (plan marked complete; actual test body pending pytest green verification).
-- [ ] **RT4** – Un‑priced flag test (plan marked complete; actual test body pending pytest green verification).
+- [x] **EP3** – E2E pipeline validation with sample PDF (superseded — now fully in scope and implemented in `docs/superpowers/plans/2026-08-21-phase-2-ep3-yr2-plan.md`, Task 1: `test_ep3_e2e_pipeline_validation_on_sample`; nothing skipped).
+- [x] **RT1** – Component‑count test (implemented as `test_component_counts_from_electrical_sheet`, green).
+- [x] **RT2** – E2E pipeline integration test (implemented as `test_e2e_pipeline_endpoint_on_sample`, green).
+- [x] **RT3** – BOQ clickability test (implemented as `test_boq_clickability_to_source_region`, green).
+- [x] **RT4** – Un‑priced flag test (implemented as `test_unpriced_flag_never_substitutes_zero`, green).
+- [x] **YR2** – `persist_assembly_to_db` test coverage (implemented in `docs/superpowers/plans/2026-08-21-phase-2-ep3-yr2-plan.md`, Task 2: `test_yaml_rule_persistence_to_db`).
 
 ## 3. YAML Rules Compliance
 

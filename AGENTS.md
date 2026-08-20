@@ -5,13 +5,9 @@ AEC Blueprint Intelligence System — construction quantity takeoff (QTO) / cost
 ## Read first
 
 - `docs/Memory.md` — session-state tracker; **read it before starting work and update it at the end of every session**.
-- `docs/Architecture.md`, `docs/Rules.md`, `docs/Phases.md` — docs of record. Current phase: 0 (Foundation).
-- `docs/Phase-0-Code-Review-Log.md` — Phase 0 code quality analysis; ruff/pytest compliance & trap constraints.
-- `docs/Phase-1-Code-Review-Log.md` — Phase 1 code quality analysis; ruff/pytest compliance & trap constraints.
-- `docs/Phase-1.5-Code-Review-Log.md` — Phase 1.5 code quality analysis; fallow/rust compliance & trap constraints.
-- `docs/Phase-2-Code-Review-Log.md` — Phase 2 code quality analysis; ruff/pytest compliance & trap constraints.
-- `docs/Frontend-Code-Review-Log.md` — frontend code quality analysis; code review log from fallow scan.
-- `docs/Backend-Code-Review-Log.md` — backend code quality analysis; ruff/pytest compliance & trap constraints.
+- `docs/Architecture.md`, `docs/Rules.md`, `docs/Phases.md` — docs of record. Current phase: 2 (Full Electrical discipline ✅ complete).
+- `docs/superpowers/reviews/` — code review logs (Phase 0, 1, 1.5, 2, Frontend, Backend); ruff/pytest/fallow compliance & trap constraints.
+- `docs/superpowers/plans/`, `docs/superpowers/specs/` — all implementation plans and design specs. Every future plan and spec is written with the superpowers workflow and saved here (brainstorming → `docs/superpowers/specs/YYYY-MM-DD-<topic>.md`, writing-plans → `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`). Do not create plan/spec docs anywhere else.
 
 ## Non-negotiable rule
 
