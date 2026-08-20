@@ -302,6 +302,10 @@ def import_catalog(
                 failed += 1
                 errors.append({"row": idx, "reason": f" unexpected error: {str(e)[:100]}"})
 
+        # Commit all ingested rows — without this, the Session context manager
+        # rolls back every uncommitted change on exit and nothing persists.
+        db_session.commit()
+
     return {"successful": successful, "failed": failed, "errors": errors}
 
 
@@ -332,6 +336,6 @@ def list_materials() -> List[Dict[str, Any]]:
                 "name": m.name,
                 "unit": m.unit,
                 "category": m.category,
-                "latest_unit_price": latest_price,
+                "latest_unit_price": float(latest_price) if latest_price is not None else None,
             })
     return materials
