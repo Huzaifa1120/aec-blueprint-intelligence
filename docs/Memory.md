@@ -20,6 +20,7 @@
 
 | Date | Phase | What was done | Verified by |
 |---|---|---|---|
+| 2026-08-21 | 2 | Phase 2 fully pushed to GitHub (feature → dev → main). EP3 + YR2 remaining plan/spec written to `docs/superpowers/` and committed; plan/spec/review logs reorganized under `docs/superpowers/{plans,specs,reviews}/`. Convention recorded: all future plans/specs go in the superpowers folder. | Phase 2 tests 10/10 green; branches synced; working tree clean |
 | 2026-08-19 | 0 | Created `.venv` (Python 3.13.1). Backend scaffold: `pyproject.toml` (fastapi, uvicorn, pymupdf, shapely), `app/main.py` (`/` + `/health`), tests, ruff clean. Frontend scaffold: Next.js 16 (TS, Tailwind v4, App Router) at `frontend/`, `page.tsx` calls backend `/health`. | pytest 2 passed, ruff clean, `npm run build` green, e2e smoke: frontend rendered backend status `healthy` |
 | 2026-08-19 | 0 | Phase 0 complete: SQLite DB layer (SQLAlchemy models), Alembic migration for initial schema, env files for both projects, git consolidation into single monorepo, sample fixture registered, `/health` reports DB status. | pytest 11 passed, ruff clean, `alembic upgrade head` applies (15 tables), app boots (`/health` → `{"status":"healthy","db":"ok"}`), `npm run lint` + `npm run build` green |
 
@@ -72,6 +73,7 @@ The two dev servers run independently; the frontend reaches the backend at `NEXT
 
 ## Known issues / gotchas
 
+- **All plans, specs, and code-review logs live in `docs/superpowers/{plans,specs,reviews}/`** — written with the superpowers workflow (brainstorming → spec, writing-plans → plan). Never create plan/spec docs elsewhere. Existing plan/spec docs moved there 2026-08-21 (`2026-08-20-phase-2-electrical-plan/spec.md`, `2026-08-21-phase-2-remaining-plan/spec.md`, `2026-08-21-phase-2-ep3-yr2-plan/spec.md`, etc.).
 - venv lives at `backend/.venv` (moved 2026-08-19 from repo root so the FastAPI project is self-contained). Use `python -m <tool>` instead of `<tool>.exe` — console-script exes (pytest.exe, ruff.exe) embed the old absolute path and break after a move.
 - `pip install --upgrade pip` inside a running venv failed with WinError 32 (file locked). Recreate venv + install instead; skip pip upgrades.
 - pip 24.3 ignores PEP 735 `[dependency-groups]`; dev tools (pytest, ruff) installed explicitly.
