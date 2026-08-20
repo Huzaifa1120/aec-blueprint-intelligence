@@ -108,11 +108,11 @@ Status legend: ⬜ not started · 🟦 in progress · ✅ done
 - **Catalog import endpoint** (`app/catalog/router.py`):
   - `POST /api/catalog/import` commits imported rows (was silently rolling back)
   - Prices returned as numbers, not `Decimal` strings
-- **Regression suite**: 10/10 Phase 2 tests green, including real pipeline run on the sample sheet (T1, T10) and API-level import proof (T9)
+- **Regression suite**: 12/12 Phase 2 tests green, including real pipeline run on the sample sheet (T1, T10), API-level import proof (T9), and the EP3+YR2 closure tests (`test_ep3_e2e_pipeline_validation_on_sample`, `test_yaml_rule_persistence_to_db`)
 
 **DoD:** A second real electrical sheet estimated end-to-end; catalogs editable without code changes; every BOQ number clickable to its source region; confidence tiering (MEASURED/DERIVED/ASSUMED) on all items.
 
-*Phase 2 implementation complete — regression suite (10/10) green.*
+*Phase 2 implementation complete — regression suite (12/12) green; EP3+YR2 DoD gates locked in.*
 
 ## Phase 3 — Mechanical (HVAC)
 
