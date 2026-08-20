@@ -10,8 +10,8 @@
 
 - **Project:** AEC Blueprint Intelligence System (construction QTO / cost estimating)
 - **Docs of record:** `docs/PRD.md`, `docs/Architecture.md`, `docs/Rules.md`, `docs/Phases.md`, `docs/Design.md`, `docs/AEC-Blueprint-System-Design-Spec.md`
-- **Current phase:** Phase 0 — Foundation (✅ done)
-- **Status summary:** Phase 0 — Foundation (✅ done). Backend + frontend scaffolded; SQLite DB layer with SQLAlchemy + Alembic migration; fixture registered; all DoD gates green.
+- **Current phase:** Phase 2 — Full Electrical discipline (✅ done, all remaining EP3/YR2 items closed)
+- **Status summary:** Phase 2 fully complete. EP3 (E2E pipeline validation on sample) + YR2 (persist_assembly_to_db) tests written, suite now 12/12 green, merged feature → dev → main and pushed. Working tree clean.
 - **Python:** `C:\Users\Huzaifa\AppData\Local\Programs\Python\Python313\python.exe` (3.13.15)
 
 ---
@@ -20,6 +20,7 @@
 
 | Date | Phase | What was done | Verified by |
 |---|---|---|---|
+| 2026-08-21 | 2 | **Phase 2 fully closed.** Executed `docs/superpowers/plans/2026-08-21-phase-2-ep3-yr2-plan.md` (Tasks 1–4 all `[x]`): wrote `test_ep3_e2e_pipeline_validation_on_sample` (gates E1–E9) and `test_yaml_rule_persistence_to_db` (gates Y1–Y5) in `backend/tests/test_phase2_regression.py` (now 12 tests). Fixed 2 new ruff violations in the appended code (E741 `l`, F811 `Material` redefinition) — no new violations vs baseline. Merged `feature/phase2-ep3-yr2` → dev → main (`--no-ff`), pushed both, deleted feature branch. Note: `tests/test_phase1.5_regression.py` has a pre-existing pytest collection error (unrelated, present on baseline). | Phase 2 suite 12/12 green; ruff no new violations; `main` == `origin/main` == `a8120a5`, `dev` == `origin/dev` == `b6b3b53`; working tree clean |
 | 2026-08-21 | 2 | Phase 2 fully pushed to GitHub (feature → dev → main). EP3 + YR2 remaining plan/spec written to `docs/superpowers/` and committed; plan/spec/review logs reorganized under `docs/superpowers/{plans,specs,reviews}/`. Convention recorded: all future plans/specs go in the superpowers folder. | Phase 2 tests 10/10 green; branches synced; working tree clean |
 | 2026-08-19 | 0 | Created `.venv` (Python 3.13.1). Backend scaffold: `pyproject.toml` (fastapi, uvicorn, pymupdf, shapely), `app/main.py` (`/` + `/health`), tests, ruff clean. Frontend scaffold: Next.js 16 (TS, Tailwind v4, App Router) at `frontend/`, `page.tsx` calls backend `/health`. | pytest 2 passed, ruff clean, `npm run build` green, e2e smoke: frontend rendered backend status `healthy` |
 | 2026-08-19 | 0 | Phase 0 complete: SQLite DB layer (SQLAlchemy models), Alembic migration for initial schema, env files for both projects, git consolidation into single monorepo, sample fixture registered, `/health` reports DB status. | pytest 11 passed, ruff clean, `alembic upgrade head` applies (15 tables), app boots (`/health` → `{"status":"healthy","db":"ok"}`), `npm run lint` + `npm run build` green |
