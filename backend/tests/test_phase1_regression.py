@@ -60,9 +60,9 @@ def test_sample_fixture_pdf_valid() -> None:
         assert text != "", "Expected extractable text (title block/dimensions)"
         # Check for scale notation
         import re
-        scale_found = bool(re.search(r"\b1:\d+\b", text))
+        scale_found = bool(re.search(r"\b1[/:]\d+\b", text))
         assert scale_found, (
-            "Expected scale notation (e.g. 1:100) in extractable text"
+            "Expected scale notation (e.g. 1:100 or 1/100) in extractable text"
         )
     finally:
         doc.close()
@@ -160,7 +160,7 @@ def test_assembly_rules_yaml() -> None:
 
 def test_cost_engine_pure_functions() -> None:
     """Test the cost engine pure functions (zero AI, fully deterministic)."""
-    from app.catalog.prices import material_cost, labor_hours, labor_cost, total_cost, compute_boq_item
+    from app.catalog.prices import material_cost, labor_hours, labor_cost, total_cost, compute_boq_item, ingest_material_price
 
     # material_cost
     mc = material_cost(5.0, 3.50)

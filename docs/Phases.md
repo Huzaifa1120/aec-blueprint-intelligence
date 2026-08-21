@@ -114,14 +114,16 @@ Status legend: ⬜ not started · 🟦 in progress · ✅ done
 
 *Phase 2 implementation complete — regression suite (12/12) green; EP3+YR2 DoD gates locked in.*
 
-### Known Phase 1 test bugs (non-blocking, pre-date Phase 2)
+### Known Phase 1 test bugs
 
-Two Phase 1 regression tests fail in `backend/tests/test_phase1_regression.py`. These are **test-file bugs**, not production defects — the Phase 1 DoD is met and Phase 2 builds on Phase 1 successfully (12/12 green). Safe to proceed to Phase 3.
+Two Phase 1 regression tests were fixed during Phase 2 validation:
 
-| Test | Failure | Root cause |
-|------|---------|------------|
-| `test_sample_fixture_pdf_valid` | "Expected scale notation (e.g. 1:100) in extractable text" | Test asserts scale text exists via an outdated extraction method; the actual pipeline detects `1:100` correctly (proven by Phase 2 T2, T10, EP3). |
-| `test_cost_engine_pure_functions` | `NameError: name 'ingest_material_price' is not defined` | Missing import in the test file; `ingest_material_price` exists in `app/catalog/prices.py` and is exercised by Phase 2 T5, T9. |
+| Test | Status | Fix |
+|------|--------|-----|
+| `test_sample_fixture_pdf_valid` | ✅ Fixed | Updated scale notation regex from `\b1:\d+\b` to `\b1[/:]\d+\b` to support both `1:100` and `1/100` formats — the PDF contains `1/100` in the title block. |
+| `test_cost_engine_pure_functions` | ✅ Fixed | Added `ingest_material_price` to the import from `app.catalog.prices`. |
+
+All 10 Phase 1 regression tests now pass (10/10 green). The Phase 1 DoD is met and Phase 2 builds on Phase 1 successfully.
 
 ---
 
