@@ -1,4 +1,7 @@
-"""YOLOv8 shape-cluster detection — Phase 1.5 raster/CV fallback path ONLY.
+"""**QUARANTINED (Phase 2.5, spec v3 §7.7/§9):** superseded technique. Not part of the
+default stack; requires explicit `ENABLE_LEGACY_YOLO=1`.
+
+YOLOv8 shape-cluster detection — Phase 1.5 raster/CV fallback path ONLY.
 
 CRITICAL CONSTRAINT (AGENTS.md Rules.md §4, trap.md): YOLOv8 belongs ONLY in
 the raster fallback (Phase 1.5), NOT in the v1 vector path. This file is
@@ -17,6 +20,7 @@ used in the vector (Phase 1) path.
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING, Dict, List, Any
 
 if TYPE_CHECKING:
@@ -32,14 +36,17 @@ logger = logging.getLogger(__name__)
 _YOLO_AVAILABLE = False
 _YOLO_IMPORT_ERROR = None
 
-try:
-    from ultralytics import YOLO
-    _YOLO_AVAILABLE = True
-except ImportError as e:
-    _YOLO_IMPORT_ERROR = str(e)
-    logger.warning(
-        f"Ultralytics YOLOv8 not available (expected in Phase 1; "
-        f"optional for Phase 1.5 raster fallback). Error: {e}"
+if os.environ.get("ENABLE_LEGACY_YOLO") == "1":
+    try:
+        from ultralytics import YOLO  # AGPL-3.0 — deliberate opt-in ONLY (spec v3 §7.7)
+
+        _YOLO_AVAILABLE = True
+    except ImportError as e:
+        _YOLO_IMPORT_ERROR = str(e)
+else:
+    _YOLO_IMPORT_ERROR = (
+        "Ultralytics YOLOv8 is quarantined (AGPL-3.0 licensing exposure; "
+        "spec v3 §7.7). Set ENABLE_LEGACY_YOLO=1 to override deliberately."
     )
 
 # Symbol for "not available" — used when YOLO is not installed
@@ -152,40 +159,52 @@ def cluster_shapes_by_proximity(
     - ✅ No universal symbol detector logic embedded
     """
     import numpy as np
-    from sklearn.cluster import DBSCAN
 
     if not shapes:
         return []
 
-    # Extract centroids for DBSCAN clustering
-    centroids = np.array([s["centroid"] for s in shapes])
+    # Extract centroids for greedy proximity clustering (numpy-only;
+    # the former DBSCAN dependency was removed in Phase 2.5 — spec v3 §7.7A
+    # supersedes trained-detector-era helpers in this quarantined legacy module)
+    centroids = np.array([s["centroid"] for s in shapes], dtype=float)
 
     if len(centroids) < min_pts:
         # Return each shape as its own cluster (noise)
         return [{"cluster_id": -1, "shapes": [s["id"] if "id" in s else i], "note": "single_detection"} for i, s in enumerate(shapes)]
 
-    # Apply DBSCAN clustering on centroids
-    clustering = DBSCAN(eps=eps, min_samples=min_pts).fit(centroids)
-    labels = clustering.labels_
+    # Greedy single-linkage clustering with the same eps/min-samples
+    # semantics as the former DBSCAN call, implemented in plain numpy
+    labels = np.full(len(centroids), -1, dtype=int)
+    next_id = 0
+    for i in range(len(centroids)):
+        if labels[i] != -1:
+            continue
+        labels[i] = next_id
+        stack = [i]
+        while stack:
+            j = stack.pop()
+            dist = np.linalg.norm(centroids - centroids[j], axis=1)
+            for n in np.where((dist <= eps) & (labels == -1))[0]:
+                labels[n] = next_id
+                stack.append(int(n))
+        next_id += 1
 
-    clusters: Dict[int, List[Dict[str, Any]]] = {}
-    for idx, label in enumerate(labels):
-        if label not in clusters:
-            clusters[label] = []
-        clusters[label].append(shapes[idx])
+    sizes = {cid: int(np.count_nonzero(labels == cid)) for cid in range(next_id)}
 
     # Convert to result format
     result: List[Dict[str, Any]] = []
-    for label, cluster_shapes in clusters.items():
+    for cid in range(next_id):
+        if sizes[cid] < min_pts:
+            continue
         result.append({
-            "cluster_id": int(label),
-            "shapes": cluster_shapes,
+            "cluster_id": cid,
+            "shapes": [shapes[i] for i in np.where(labels == cid)[0]],
             "note": "clustered_detection",
         })
 
-    # Add noise items (label == -1) as individual clusters
-    for idx, label in enumerate(labels):
-        if label == -1:
+    # Add noise items (clusters smaller than min_pts) as individual clusters
+    for idx in range(len(shapes)):
+        if sizes[int(labels[idx])] < min_pts:
             result.append({
                 "cluster_id": -1,
                 "shapes": [shapes[idx]],
