@@ -53,7 +53,7 @@ def load_assembly_rule(name: str) -> Optional[Dict]:
 
 def apply_assembly(
     component_type: str,
-    rule_name: str = "access_control_door",
+    rule_name: str = "",
 ) -> Dict[str, Any]:
     """Apply an assembly rule set to a component type.
 
@@ -65,7 +65,10 @@ def apply_assembly(
 
     Constraint: Rules loaded from YAML, never hardcoded.
     """
-    rule = load_assembly_rule(rule_name)
+    # Use component_type as the rule name if rule_name is not specified
+    # This allows the function to be called with just the assembly type
+    lookup_name = rule_name if rule_name else component_type
+    rule = load_assembly_rule(lookup_name)
     if rule is None:
         return {
             "materials": [],

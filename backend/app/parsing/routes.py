@@ -169,6 +169,22 @@ def extract_polyline_from_items(
     return points
 
 
+def deduplicate_routes(routes: List[RouteGeo]) -> List[RouteGeo]:
+    """Deduplicate routes by source_path_ids.
+
+    Keeps only one representative per unique source_path_ids subset,
+    preserving order of first appearance.
+    """
+    seen: set = set()
+    unique: List[RouteGeo] = []
+    for route in routes:
+        key = tuple(sorted(route.get("source_path_ids", [])))
+        if key not in seen:
+            seen.add(key)
+            unique.append(route)
+    return unique
+
+
 def measure_routes(
     clusters: List[Dict],
     raw_drawings: List[Dict],
@@ -249,4 +265,6 @@ def measure_routes(
 
         measured_routes.append(route)
 
+    # Deduplicate routes with identical source_path_ids
+    measured_routes = deduplicate_routes(measured_routes)
     return measured_routes

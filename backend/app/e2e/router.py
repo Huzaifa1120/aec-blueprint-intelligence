@@ -115,8 +115,18 @@ def e2e_run(
         boq_items: List[Dict[str, Any]] = []
         with OrmSession(get_engine()) as db:
             # Route BOQ: quantity scales with measured length
+            # Routes must ONLY evaluate against route-based assembly rules
+            # Strict filter: route geometries must only map to route-based assemblies
+            # (cable_tray, conduit) and never to point-based assemblies (lighting, switches, etc.)
             for route in routes:
-                assembly_type = layer_to_assembly(route.get("layer")) or route["type"]
+                layer = route.get("layer", "")
+                resolved_assembly = layer_to_assembly(layer)
+                # Use resolved layer assembly if available, fall back to route type
+                assembly_type = resolved_assembly if resolved_assembly else route.get("type", "")
+                # Enforce: routes must only use route-based assembly rules
+                # Point-based assemblies (lighting, switch, socket, etc.) are strictly excluded
+                if assembly_type not in {"cable_tray", "conduit"}:
+                    continue
                 applied = apply_assembly(assembly_type)
                 for mat in applied.get("materials", []):
                     quantity = mat["quantity"] * route["length_m"]
@@ -132,8 +142,22 @@ def e2e_run(
                     )
 
             # Component BOQ: one assembly instance per counted symbol
+            # Enforce strict 1-to-1 layer-to-assembly matching
+            # Before applying any rule, verify the component's resolved type
+            # exactly matches the rule name. This prevents access_control_door
+            # components from yielding lighting_outlet, cable_tray, or other
+            # unrelated assemblies.
             for comp in components:
-                assembly_type = comp["assembly_type"]
+                resolved_type = comp.get("assembly_type")
+
+                # Load available assembly rules from the rules engine
+                from app.assembly.rules import load_assembly_rule as _load_rule
+                rule = _load_rule(resolved_type)
+                if rule is None or resolved_type != rule.get("name", resolved_type):
+                    # STRICT SKIP: Do not apply lighting_outlet to access_control_door
+                    continue
+
+                assembly_type = resolved_type
                 applied = apply_assembly(assembly_type)
                 for mat in applied.get("materials", []):
                     quantity = mat["quantity"] * comp["count"]

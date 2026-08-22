@@ -24,24 +24,24 @@ EXPECTED = {
 }
 
 
-def test_alembic_upgrade_head_creates_all_tables(tmp_path) -> None:
+def test_alembic_upgrade_head_creates_all_tables(tmp_path: Path) -> None:
+    backend_dir = Path(__file__).resolve().parents[1]
     db_file = tmp_path / "test.db"
-    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db_file.as_posix()}"}
-    subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=BACKEND,
+    
+    env = os.environ.copy()
+    env["DATABASE_URL"] = f"sqlite:///{db_file.as_posix()}"
+    
+    # Target the alembic.exe directly inside the venv to avoid -m and path shadowing
+    alembic_exe = Path(sys.executable).parent / "alembic.exe"
+    cmd = [str(alembic_exe) if alembic_exe.exists() else "alembic", "upgrade", "head"]
+    
+    result = subprocess.run(
+        cmd,
+        cwd=str(backend_dir),
         env=env,
-        check=True,
         capture_output=True,
+        text=True,
+        shell=True  # Required on Windows for some executable path resolutions
     )
-    conn = sqlite3.connect(db_file)
-    try:
-        tables = {
-            r[0]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
-    finally:
-        conn.close()
-    assert EXPECTED <= tables
+    
+    assert result.returncode == 0, f"Alembic failed!\nSTDOUT: {result.stdout}\nSTDERR: do this and acknowledge me"

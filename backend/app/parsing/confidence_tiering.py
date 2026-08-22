@@ -48,6 +48,8 @@ def assign_confidence_status(
     """
     if source == "vector":
         return "MEASURED"
+    elif source == "raster":
+        return "MEASURED"
     elif source in ("assembly_rule", "formula"):
         # Verify rule_version is recorded for auditability
         if not rule_version:
