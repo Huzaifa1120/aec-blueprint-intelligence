@@ -66,3 +66,11 @@ def test_core_chain_roundtrip() -> None:
         assert boq.estimate_id == estimate.id
         assert material.prices[0].unit_price == 5.50
         assert assembly.materials[0].name == "Cable"
+
+
+def test_geometry_models_have_source_quality() -> None:
+    from app.db.models.geometry import Component, Route, Space
+
+    for model in (Component, Route, Space):
+        assert hasattr(model, "source_quality"), f"{model.__name__} missing source_quality"
+        assert model.__table__.c.source_quality.default.arg == "layered_vector"

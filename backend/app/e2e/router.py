@@ -52,8 +52,16 @@ def _boq_line(
     confidence_status: str,
     source_path_ids: List[str],
     db: OrmSession,
+    source_quality: str = "layered_vector",
 ) -> Dict[str, Any]:
+    from app.core.config import get_settings
+
     boq = compute_boq_item(quantity, material_name, db)
+    base_score = (
+        get_settings().degraded_confidence_multiplier
+        if source_quality == "degraded_vector"
+        else 1.0
+    )
     return {
         "assembly_type": assembly_type,
         "material_name": material_name,
@@ -62,6 +70,8 @@ def _boq_line(
         "total_cost": boq.get("total_cost"),
         "unpriced": boq.get("unpriced", False),
         "confidence_status": confidence_status,
+        "confidence_score": base_score,
+        "source_quality": source_quality,
         "source_path_ids": source_path_ids,
     }
 
@@ -97,6 +107,8 @@ def e2e_run(
                 "status": "raster",
                 "detail": "PDF classified as raster; vector pipeline skipped.",
             }
+
+        source_quality = classify_result.get("source_quality", "layered_vector")
 
         # 2️⃣ Parse PDF
         parsed = parse_pdf(tmp_path)
@@ -138,6 +150,7 @@ def e2e_run(
                             route.get("confidence_status", "MEASURED"),
                             route.get("source_path_ids", []),
                             db,
+                            source_quality=source_quality,
                         )
                     )
 
@@ -169,6 +182,7 @@ def e2e_run(
                             comp.get("confidence_status", "MEASURED"),
                             comp.get("source_path_ids", []),
                             db,
+                            source_quality=source_quality,
                         )
                     )
 

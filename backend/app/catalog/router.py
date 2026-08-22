@@ -21,8 +21,7 @@ from fastapi import APIRouter, File, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.session import get_engine, get_db
-from app.db.models.catalog import Material, Price as PriceModel, LaborRate
+from app.db.models.catalog import Material
 from app.catalog.prices import (
     ingest_material_price,
     ingest_labor_rate,
@@ -164,7 +163,6 @@ def import_catalog(
     # Use get_db() generator to get a session
     # Since this is a FastAPI endpoint, we need to manage the session lifecycle
     # For simplicity in this endpoint, we'll create our own session
-    from sqlalchemy.orm import Session as OrmSession
     from app.db.session import create_engine
 
     engine = create_engine(get_settings().database_url)
@@ -317,8 +315,6 @@ def list_materials() -> List[Dict[str, Any]]:
     """List all materials with their latest unit prices."""
     from sqlalchemy import select
 
-    engine = get_settings().database_url
-    # Use the engine from config
     from app.db.session import create_engine as _create_engine
     engine_obj = _create_engine(get_settings().database_url)
 

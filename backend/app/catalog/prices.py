@@ -15,8 +15,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy.orm import Session
 
-from app.db.models.catalog import Material, Price as PriceModel, LaborRate
-from app.db.session import get_engine
+from app.db.models.catalog import Price as PriceModel, LaborRate as LRModel
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +100,7 @@ def list_materials(db_session: Session) -> List[Dict[str, Any]]:
 def get_latest_price(db_session: Session, material_name: str) -> Optional[float]:
     """Get the latest unit price for a material by name."""
     from sqlalchemy import select
-    from app.db.models.catalog import Material as MatModel, Price as PriceModel
+    from app.db.models.catalog import Material as MatModel
 
     stmt = select(MatModel).where(MatModel.name == material_name)
     mat = db_session.execute(stmt).scalar_one_or_none()
@@ -195,7 +194,6 @@ def ingest_labor_rate(
 ) -> LRModel:
     """Ingest/upgrade a labor rate (productivity + hourly rate)."""
     from sqlalchemy import select
-    from app.db.models.catalog import LaborRate as LRModel
 
     # Find or create LaborRate
     stmt = select(LRModel).filter_by(name=name)

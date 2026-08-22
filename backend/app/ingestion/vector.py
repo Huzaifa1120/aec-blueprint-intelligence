@@ -1,7 +1,8 @@
 """Vector parsing engine — PyMuPDF extraction for access control takeoff.
 
-Extracts paths, text spans, OCG layers, and clusters same-layer paths
-via DBSCAN into discrete component instances.
+Extracts paths, text spans, OCG layers, and clusters same-layer symbol-scale
+paths via deterministic distance-threshold connected components (spec v3
+§7.4) into discrete component instances.
 
 Constraint: Always import pymupdf, never the deprecated fitz alias.
 All geometry is deterministic — traceable to source path IDs.
@@ -9,14 +10,25 @@ All geometry is deterministic — traceable to source path IDs.
 
 from __future__ import annotations
 
+import re
 import uuid
-from typing import List, Dict, Optional, Tuple, TypedDict
+from typing import List, Dict, Tuple, TypedDict
 from pathlib import Path
 
 import pymupdf  # MUST import pymupdf, never fitz
 
 import numpy as np
-from sklearn.cluster import DBSCAN
+
+from app.parsing.clustering import cluster_paths_threshold, derive_threshold_px
+
+# Symbol/route separation (spec v3 §7.4 geometry-type branching): paths whose
+# bbox diagonal exceeds SYMBOL_CUTOFF_FACTOR × the merge threshold are
+# route-scale geometry (cable tray / conduit polylines) and are excluded from
+# symbol clustering — they belong to app.parsing.routes. Factor 6 fixed by
+# the human-approved clustering re-baseline of 2026-08-22 on the regression
+# sheet ({access_control_door: 2, cable_tray: 1, lighting_outlet: 26};
+# audit trail in tests/test_phase2_5_clustering_migration.py).
+SYMBOL_CUTOFF_FACTOR = 6
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +76,7 @@ def extract_drawings(page: pymupdf.Page) -> List[DrawingPath]:
     """Extract all drawn paths from a page with layer attributes.
 
     Returns list of dicts keyed by the DrawingPath schema.
-    Critical attribute: `layer` — used for DBSCAN clustering later.
+    Critical attribute: `layer` — used for clustering later.
 
     Note: PyMuPDF ≥1.24 exposes geometry as `items` (list of ('l', p1, p2) /
     ('c', ...) / ('qu', ...) tuples) and the bbox as `rect`. The legacy
@@ -151,7 +163,7 @@ def build_ocg_registry(doc: pymupdf.Document) -> Dict[str, Dict]:
 
 
 # ---------------------------------------------------------------------------
-# DBSCAN clustering
+# Clustering (spec v3 §7.4 — delegates to app.parsing.clustering)
 # ---------------------------------------------------------------------------
 
 
@@ -168,85 +180,13 @@ def cluster_paths(
     eps: float = 5.0,
     min_pts: int = 2,
 ) -> List[ClusterResult]:
-    """Cluster paths belonging to a specific layer using DBSCAN on centroids.
+    """Distance-threshold clustering (spec v3 §7.4).
 
-    Only paths whose `layer` matches (or are None and layer == "default")
-    are considered.
-
-    Returns list of clusters, each containing member path IDs, centroid,
-    and bbox envelope.
+    Signature kept for backward compatibility; eps is now the distance
+    threshold in pt. min_pts retained but unused (deterministic method has
+    no density parameter).
     """
-    # Filter paths by layer
-    layer_paths = [
-        p for p in paths
-        if p.get("layer") == layer or (p.get("layer") is None and layer == "default")
-    ]
-
-    if not layer_paths:
-        return []
-
-    # Compute centroids from bboxes
-    centroids: List[np.ndarray] = []
-    path_ids: List[str] = []
-
-    for p in layer_paths:
-        centroids.append(compute_centroid(p["bbox"]))
-        path_ids.append(p["id"])
-
-    if len(centroids) < min_pts:
-        # Return each path as its own cluster (noise)
-        return [
-            {
-                "cluster_id": -1,
-                "centroid": centroids[i],
-                "member_path_ids": [path_ids[i]],
-                "num_paths": 1,
-                "bbox": layer_paths[i]["bbox"],
-            }
-            for i in range(len(layer_paths))
-        ]
-
-    # Apply DBSCAN
-    clustering = DBSCAN(eps=eps, min_samples=min_pts).fit(np.array(centroids))
-    labels = clustering.labels_
-
-    clusters: Dict[int, ClusterResult] = {}
-    for idx, label in enumerate(labels):
-        pid = path_ids[idx]
-        if label not in clusters:
-            clusters[label] = {
-                "cluster_id": int(label),
-                "centroid": np.array(centroids[idx]),
-                "member_path_ids": [],
-                "num_paths": 0,
-                "bbox": layer_paths[idx]["bbox"],
-            }
-        clusters[label]["member_path_ids"].append(pid)
-        clusters[label]["num_paths"] += 1
-
-        # Expand bbox envelope
-        b = clusters[label]["bbox"]
-        clusters[label]["bbox"] = (
-            min(b[0], layer_paths[idx]["bbox"][0]),
-            min(b[1], layer_paths[idx]["bbox"][1]),
-            max(b[2], layer_paths[idx]["bbox"][2]),
-            max(b[3], layer_paths[idx]["bbox"][3]),
-        )
-
-    result = list(clusters.values())
-
-    # Add noise items (label == -1) as individual clusters
-    for idx, label in enumerate(labels):
-        if label == -1:
-            result.append({
-                "cluster_id": -1,
-                "centroid": np.array(centroids[idx]),
-                "member_path_ids": [path_ids[idx]],
-                "num_paths": 1,
-                "bbox": layer_paths[idx]["bbox"],
-            })
-
-    return result
+    return cluster_paths_threshold(paths, layer, threshold_px=eps)
 
 
 # ---------------------------------------------------------------------------
@@ -262,8 +202,6 @@ def detect_scale(text_spans: List[TextSpan], default: str = "1:100") -> str:
 
     Returns the detected scale string, or the default if none found.
     """
-    import re
-
     scale_patterns = [
         r"\b(\d+\.\d+:\d+)\b",   # e.g., 1:100, 1:50
         r"\b(\d+:\d+)\b",
@@ -278,6 +216,18 @@ def detect_scale(text_spans: List[TextSpan], default: str = "1:100") -> str:
                 return m.group(1)
 
     return default
+
+
+def _scale_denominator(scale_str: str) -> float:
+    """Parse a scale string like "1:100" into its denominator (100.0).
+
+    Falls back to 100.0 for unparseable or zero-numerator strings —
+    the same never-assume posture as detect_scale's explicit default.
+    """
+    m = re.search(r"(\d+)\s*:\s*(\d+)", scale_str)
+    if not m or int(m.group(1)) == 0:
+        return 100.0
+    return int(m.group(2)) / int(m.group(1))
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +262,12 @@ def parse_pdf(pdf_path: str) -> dict:
         # Detect scale
         scale = detect_scale(all_text_spans, default="1:100")
 
+        # Cluster threshold from the sheet's own scale (spec v3 §7.4):
+        # mm→pt via the scale denominator; fallback 5.0 pt until a
+        # legend-derived mm threshold exists (logged inside derive_threshold_px).
+        threshold_px = derive_threshold_px(None, _scale_denominator(scale))
+        max_symbol_diagonal_px = threshold_px * SYMBOL_CUTOFF_FACTOR
+
         # Cluster layers — access control (MVP focus) + electrical layers.
         # Layer set is data-driven via the layer mapping (data/layer_mapping.yaml)
         # plus the legacy Phase 1 access-control names, so a new sheet's layer
@@ -331,7 +287,12 @@ def parse_pdf(pdf_path: str) -> dict:
         clusters: List[ClusterResult] = []
 
         for layer_name in unique_layers:
-            layer_clusters = cluster_paths(all_drawings, layer_name, eps=5.0, min_pts=2)
+            layer_clusters = cluster_paths_threshold(
+                all_drawings,
+                layer_name,
+                threshold_px=threshold_px,
+                max_symbol_diagonal_px=max_symbol_diagonal_px,
+            )
             clusters.extend(layer_clusters)
 
         return {

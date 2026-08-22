@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import yaml
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 
-from app.db.models.catalog import Assembly, Material, Price
-from app.db.base import Base, SessionLocal
+from app.db.models.catalog import Assembly, Material
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +139,6 @@ def persist_assembly_to_db(
     rule_version = rule["rule_version"]
     bom = rule["bom"]
     labor = rule["labor"]
-    waste_factor = rule["waste_factor"]
 
     # Create or retrieve Assembly record
     assembly = session.query(Assembly).filter_by(name=assembly_name).first()
