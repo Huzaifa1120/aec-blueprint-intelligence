@@ -33,9 +33,10 @@ Default to a dark, low-saturation "drafting room" theme; light theme optional la
 | `ok` | `#34C77B` | `MEASURED` status |
 | `derived` | `#E5A02E` | `DERIVED` status (amber) |
 | `assumed` | `#E8554D` | `ASSUMED` status (red — forces review) |
+| `unmapped` | `#D2B48C` | `UNMAPPED` status (tan — measured but no rule yet) |
 | `highlight` | `#7C5CFF` | Selected BOQ line / source-geometry overlay |
 
-Confidence colors are a **hard product rule**: green/amber/red map 1:1 to `MEASURED`/`DERIVED`/`ASSUMED`. Never render confidence as a generic gray or as a single blended % gauge.
+Confidence colors are a **hard product rule**: green/amber/red/tan map 1:1 to `MEASURED`/`DERIVED`/`ASSUMED`/`UNMAPPED`. Never render confidence as a generic gray or as a single blended % gauge.
 
 ## 4. Typography
 
@@ -51,12 +52,15 @@ Scale: 13px base, 15px table data, 18px section titles, 24px page titles. Never 
 ## 5. Layout
 
 - **Three-pane review screen** (the flagship view):
-  - Left: drawing canvas (rendered PDF via `pdf.js`) with overlay highlights.
+  - Left: drawing canvas (rendered PDF via `pdf.js`) with overlay highlights per discipline.
   - Center/right: BOQ table — each row = quantity, unit, unit price, total, confidence tag.
   - Click row → center highlight jumps to source geometry; click geometry → row selected.
-- Top bar: project, sheet name, scale badge, processing status pill, export actions.
+  - Top bar: project, sheet name, scale badge, processing status pill, export actions, discipline filter dropdown.
 - Status pills: `QUEUED` · `PARSING` · `DONE` · `ERROR` — with reason tooltip on error.
 - Accept / correct / reject actions inline per row; bulk-accept bar appears when a selection is all `MEASURED`.
+- Discipline filter: filter BOQ items by classified layer discipline (architectural, electrical, envelope, structural, unclassified).
+- Layer filter: filter BOQ items by specific layer name within the selected discipline.
+- When multiple disciplines are present, group the BOQ by discipline with collapsible sections.
 
 ## 6. Drawing overlay colors
 
@@ -68,6 +72,7 @@ Overlay strokes must read against any CAD linework:
 | Route polyline | `#2FC6C0` | 2px |
 | Highlight (active) | `highlight` | 2.5px glow |
 | Review-needed | `assumed` dashed | 1.5px dashed |
+| Unmapped overlay | `unmapped` dashed | 1.5px dashed — geometry measured but no assembly rule yet |
 
 ## 7. Empty & error states
 

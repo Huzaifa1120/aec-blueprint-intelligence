@@ -22,6 +22,9 @@ Any number that appears in a BOQ must be traceable to a deterministic calculatio
 - Interpret the sheet's own legend table (symbol glyph → description).
 - Generate the natural-language **scope of work** — but *narrating from already-computed structured data only*. It may never compute the numbers it narrates.
 - Write code, refactor, explain, fix bugs, run tests.
+- **Classify layers into disciplines (architectural, electrical, envelope, structural, unclassified) using human-editable regex config.**
+- **Perform text-layer association walker to tag text spans with their controlling OCG via BDC/EMC nesting.**
+- **Parse generic schedule/attribute blocks using config-driven regex patterns, with LLM fallback.**
 
 ## 3. What the AI must NEVER do
 
@@ -30,6 +33,7 @@ Any number that appears in a BOQ must be traceable to a deterministic calculatio
 - Assume a scale. Scale must be read from the sheet (title block / scale bar / dimension string) and cross-checked.
 - Hardcode price data or productivity rates into source code. They live in the catalog DB / YAML config.
 - Ship code that exposes, logs, or commits secrets/API keys.
+- **Silently drop or ignore any CAD layer without classification/record.** Every layer must be either classified, logged as `unclassified`, or flagged for human review in the LAYER table.
 
 ## 4. Libraries — allowed vs. avoided
 
@@ -59,6 +63,8 @@ Any number that appears in a BOQ must be traceable to a deterministic calculatio
 - A missing price or productivity rate → BOQ line shows "unpriced" with the gap flagged, not $0.
 - Network/3rd-party calls (OCR, LLM) get timeouts + retries + a degradation path (e.g. LLM down → skip narration, still produce numbers).
 - All failures logged with enough context to reproduce (file id, stage, error).
+- **Unknown layer → mark items as `UNMAPPED`; human can confirm classification in review.**
+- **Incomplete assembly → item left `UNMAPPED` instead of forced into `ASSUMED`; rule gap flagged for human improvement.**
 
 ## 6. Code quality rules
 
@@ -70,8 +76,9 @@ Any number that appears in a BOQ must be traceable to a deterministic calculatio
 
 ## 7. Confidence & honesty rules
 
-- Per-line confidence status: `MEASURED` / `DERIVED` / `ASSUMED` — never one blended "%".
+- Per-line confidence status: `MEASURED` / `DERIVED` / `ASSUMED` / `UNMAPPED` — never one blended "%".
 - Raster-derived measurements always have lower base confidence than vector-derived.
+- **`UNMAPPED`** : geometry/text was measured successfully but no assembly rule exists yet to turn it into a costed BOQ line. Decouples "did we look" from "can we price it yet."
 - Never claim accuracy publicly without benchmarking against held-out, already-estimated real projects (start with 3–5).
 
 ## 8. Scope discipline

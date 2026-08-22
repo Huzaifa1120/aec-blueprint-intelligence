@@ -53,18 +53,24 @@ Rejected alternatives:
 
 ### 3.1 Ingestion router
 On upload, inspect the file:
-- **PDF** → PyMuPDF: count `page.get_drawings()` vs `page.get_images()`. High vector count + extractable text → vector path. Dominated by full-page raster images → raster path.
+- **PDF** → PyMuPDF: count `page.get_drawings()` vs `page.get_images()`. High vector count + extractable text → **vector path**. Dominated by full-page raster images → **raster path**.
 - **DWG/DXF** → `ezdxf` CAD path (always preferred when available).
-- **PNG/JPG/scanned PDF** → raster path.
-- Route logged per file; downstream branches on this decision.
+- **PNG/JPG/scanned PDF** → **raster path**.
 
+After file-type routing, perform **layer classification**: enumerate every OCG on the sheet (`doc.get_ocgs()`), classify each by regex against a human-editable config (e.g. `layer_classification_rules.yaml`), and persist the classification per sheet. Downstream branches on this decision.
 ### 3.2 Vector parsing engine (primary)
+
 - Library: `PyMuPDF` (import `pymupdf`, not deprecated `fitz`).
-- Extract: `page.get_drawings()` (paths + `layer`), `page.get_text('dict')` (spans + bbox + font size), `doc.get_ocgs()` (layer registry).
+- Extract: `page.get_drawings()` (paths + `layer` attribute), `page.get_text('dict')` (text spans with bbox + font size), `doc.get_ocgs()` (layer name registry).
+- **Each layer is classified by the Layer Registry (see §3.1) into: symbol, region, or route geometry.**
+- **Branch by classified geometry type:**
+  - **Symbol layers** → DBSCAN clustering on bbox centroids → discrete component instances (access-control devices, lighting fixtures, CCTV cameras, fire-alarm devices).
+  - **Region layers** → reconstruct polygons via `shapely.polygonize` on line segments → `Space` rooms, filtered by area threshold and cross-checked against paired name/area text.
+  - **Route layers** → extract polylines → `Route` lengths measured and scaled (CONDUIT, CABLE_TRAY, PIPE, E-PWER-CABL-TRAY-HATCH).
 - Cluster same-layer paths by spatial proximity (DBSCAN on bbox centroids, tuned per layer) → discrete component instances.
-- Classify each cluster: CAD layer name first (deterministic), legend-matching fallback when ambiguous.
+- Classify each cluster: first by CAD layer name (deterministic), falling back to legend-matching when ambiguous.
 - Determine scale from title-block text / scale bar / dimension string, cross-checked. Store per sheet — never assume a global default.
-- Output: typed geometry objects with real-world coordinates, linked back to source paths.
+- Output: typed geometry objects with real-world coordinates, each linked back to its raw source paths for traceability.
 
 ### 3.3 Raster / CV fallback (secondary)
 - Render page at high DPI (`page.get_pixmap(dpi=...)`).
@@ -107,16 +113,28 @@ total        = material_cost + labor_cost + equipment_cost + waste + contingency
 | `MEASURED` | Directly read from vector geometry |
 | `DERIVED` | Calculated via assembly/formula from a measured input |
 | `ASSUMED` | Filled from a default assumption, no source data |
+| `UNMAPPED` | Measured successfully but no assembly rule exists yet to turn it into a costed BOQ line |
 
-Show status per line, never a single blended "accuracy %".
+Show status per line, never a single blended "accuracy %". `UNMAPPED` decouples "did we look" from "can we price it yet."
+### 3.9 Text-layer association walker
 
-### 3.9 Human review UI
+First check whether the installed PyMuPDF version exposes OCG membership on text spans directly; if not, fall back to a `BDC/EMC`-tracking content-stream walker tracking `BDC /OC … EMC` nesting around `Tj`/`TJ` operators. **Output: every text span tagged with its controlling layer (or "untagged" if none), ready for spatial join.** Prototyped and validated against the sample sheet using `pikepdf.parse_content_stream` — it correctly separated all 388 text-show operations by controlling layer. Once each text span has a layer, join `M_SAUDI_ROOM-nametr` + `M_SAUDI_ROOM-area` text to the nearest `M_SAUDI_AREAS` polygon centroid to get a labeled, area-verified `Space` row — geometry measures the area, text confirms the label, no model involved.
+
+### 3.10 Generic schedule & attribute-block parser
+
+Config-driven regex pattern library for common AEC schedule field shapes (`"<label> \(<unit>\):<value>"`, `"%<slope> - <run>cm"`, `"<block-prefix>-<letter><NN>"`). Anything the regex library doesn't match falls through to the LLM interpretation tier for a proposed classification, which a human confirms. This matches the existing guiding principle: "AI proposes, geometry/rules decide," without adding a new exception to it.
+
+### 3.11 Human review UI
+
 - Overlay every extracted quantity/component on the original drawing.
 - Click BOQ line → highlight exact source geometry.
 - Accept / correct / reject per item; corrections logged as training/rule-improvement signal.
-- Bulk-accept for `MEASURED`; force review for `ASSUMED`.
+- Bulk-accept for `MEASURED`; force review for `ASSUMED` and `UNMAPPED`.
 
-### 3.10 Output generation
+### 3.12 Output generation
+
+- BOQ, BOM, scope of work (LLM narrates *from structured data only*), workforce/labor estimate.
+- Exports: JSON (API), XLSX, PDF.
 - BOQ, BOM, scope of work (LLM narrates *from structured data only*), workforce/labor estimate.
 - Exports: JSON (API), XLSX, PDF.
 
@@ -171,15 +189,20 @@ AEC-software/
 | Auth | Clerk |
 | LLM layer | Claude API (function-calling / structured output) — interpretation & narration only |
 | Containerization | Docker (K8s later if scaling) |
+| Layer classification | Human-editable regex config (`layer_classification_rules.yaml`) |
+| Text-layer association | `pikepdf` content-stream walker (BDC/EMC nesting) |
+| Schedule parser | Config-driven regex patterns + LLM fallback |
 
 ## 6. Data model (core tables)
 
 `PROJECT → DRAWING → DRAWING_REVISION → SHEET → {COMPONENT | ROUTE | SPACE}`
+`LAYER` — every OCG on every sheet, classified by discipline (architectural, electrical, envelope, structural, unclassified); human-correction supported; foreign key into `COMPONENT.source_layer`, `ROUTE.source_layer`, and `SPACE.source_layer`
+`SCHEDULE_BLOCK` — parsed elevator-spec-style free text and generalizes the existing legend table handling; fields: block_type, parsed_fields (key: value pairs with confidence), source_region
 `COMPONENT → MEASUREMENT` (audit trail: source_sheet, source_region, method, raw/final value, confidence)
 `MEASUREMENT → BOQ_ITEM → ESTIMATE`
 `ASSEMBLY → {MATERIAL, LABOR_TYPE}`; `MATERIAL → PRICE` (effective_from/to)
 
-**Key point:** `MEASUREMENT` is the audit-trail table. Every `BOQ_ITEM` traces back through it — this is what makes the review UI possible. Full ERD in the Design Spec §8.
+**Key point:** `MEASUREMENT` is the audit-trail table. Every `BOQ_ITEM` traces back through it to `source_sheet` + `source_region` + `calculation_method`. This is what makes the review UI possible. Full ERD in the Design Spec §8.
 
 ## 7. API surface (v1 sketch)
 
@@ -193,4 +216,7 @@ GET    /projects/{id}/estimate          # BOQ/cost/labor
 POST   /catalogs/materials              # price catalog upload/update
 POST   /catalogs/labor-rates            # productivity rates
 GET    /assemblies | POST /assemblies   # list/edit/version rules
+POST   /drawings/{id}/classify-layers   # enumerate + classify OCGs per discipline
+POST   /drawings/{id}/text-layers       # tag text spans with controlling OCGs
+POST   /drawings/{id}/parse-schedules   # parse schedule/attribute blocks
 ```

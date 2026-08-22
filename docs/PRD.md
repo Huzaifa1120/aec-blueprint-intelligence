@@ -65,12 +65,32 @@ Estimating quantity takeoff (QTO) from drawings is manual, slow, and error-prone
 - Lighting, power, switches, sockets, distribution boards, cable trays.
 - Price catalog & labor rate CRUD (upload/spreadsheet import, multiple price sets).
 
-### v3+
-- Mechanical (HVAC, ducts, pipes, equipment); plumbing & fire protection.
-- Architectural (walls, doors, windows, flooring, ceilings, finishes).
-- Structural (concrete, rebar, formwork) — requires the structural sheet set.
+### v3 — Multi-Domain Extraction Upgrade
+- Extract maximum recoverable data across **every** domain present in a sheet, not just the domain the sheet is titled after.
+- Layer classification & domain taxonomy: each OCG classified as architectural, electrical, envelope, structural, or unclassified (human-correction supported).
+- Symbol-instance clustering: generalized DBSCAN per classified layer (access-control devices, lighting fixtures, CCTV cameras, fire-alarm devices).
+- Polygon/region reconstruction: room boundaries from `M_SAUDI_AREAS`-type layers reassembled into closed polygons via `shapely.polygonize`, filtered by area threshold and cross-checked against paired name/area text.
+- Text–layer association walker: every text span tagged with its controlling layer via `BDC/EMC` content-stream nesting; room name+area text joined to nearest room polygon centroid.
+- Generic schedule & attribute-block parser: regex-pattern library for known AEC field shapes (elevator specs, ramp slopes, parking counts), with LLM fallback for unmatched blocks.
+- Legend/schedule-table generalization: detect any tabular symbol-key block on a sheet and match cluster counts against the present table, rather than assuming exactly one legend per sheet.
+- Four confidence statuses: `MEASURED`, `DERIVED`, `ASSUMED`, `UNMAPPED` (measured but no assembly rule exists yet to turn it into a costed BOQ line).
+- Output BOQ/BOM/scope where every number is traceable to a highlighted source region, with discipline-level filtering in the review UI.
+
+### v3.1 — Mechanical (HVAC)
+- Ducts, pipes, equipment, units.
+- Formula-based derivations for duct/pipe material by size & route length.
+
+### v3.2 — Plumbing & Fire Protection
+- Same patterns; fire-alarm layer handling (exists on the sample sheet: `FIRE ALARM`).
+
+### v4 — Architectural
+- Walls, doors, windows, flooring, ceilings, finishes.
+- Raster segmentation model earns its keep here.
+
+### v5+
+- Structural (concrete, rebar, formwork).
 - Multi-sheet / whole-project ingestion, revision/change tracking.
-- Long-term: BIM/IFC-native knowledge graph.
+- BIM/IFC-native knowledge graph.
 
 ## 6. Non-functional requirements
 
@@ -87,9 +107,19 @@ Estimating quantity takeoff (QTO) from drawings is manual, slow, and error-prone
 
 - Given the real sample sheet (`MMC-JVC-CD-ELEC-3902_AC-WIRE`): correctly counts all access-control components (verified once manually → becomes the regression test).
 - Computes correct cable/conduit lengths within the sheet's stated scale.
-- Every output number is traceable to a highlighted region on the rendered page.
+- Every output number is traceable to a highlighted region on the rendered PDF.
 - Time-to-estimate for that sheet drops below manual baseline.
 - Corrections logged during review are persisted as rule-improvement signal.
+
+## 7.3 Success metrics (v3 — Multi-Domain)
+
+- All 46 layers on the sample sheet are classified; no layer silently ignored.
+- `M_SAUDI_AREAS` room polygons extracted and paired with `M_SAUDI_ROOM-nametr`/`M_SAUDI_ROOM-area` text.
+- Symbol instances across all electrical sub-layers (access control, fire alarm, CCTV, lighting, cable tray) are clustered and counted.
+- Route lengths for CONDUIT, CABLE_TRAY, and E-PWER-CABL-TRAY-HATCH layers are measured and scaled.
+- Every BOQ number is traceable to a highlighted source region with a confidence status (`MEASURED`/`DERIVED`/`ASSUMED`/`UNMAPPED`).
+- Review UI supports filtering by discipline and layer-classification confidence.
+- Corrections logged during review persist as rule-improvement signal for assembly-rule refinement.
 
 ## 8. Out of scope (v1 — explicitly)
 
@@ -98,6 +128,13 @@ Estimating quantity takeoff (QTO) from drawings is manual, slow, and error-prone
 - Multi-sheet projects, revision comparison, multi-user collaboration.
 - A universal cross-company "construction symbol" detector.
 - Any claim of "upload anything, get a 100% accurate BOQ."
+
+## 8.2 Out of scope (v3 — Multi-Domain, until Phase 9)
+
+- Universal cross-company "construction symbol" detector before per-document legend matching is exhausted.
+- Raw material estimation (concrete/rebar/bricks) from a single-discipline sheet — requires structural/architectural set.
+- Multi-tenant deployment (single-tenant internal first recommended).
+- BIM/IFC-native knowledge graph (Phase 8+ long-term).
 
 ## 9. Open questions
 
