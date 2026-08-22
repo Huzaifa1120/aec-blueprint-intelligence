@@ -17,8 +17,10 @@ used in the vector (Phase 1) path.
 from __future__ import annotations
 
 import logging
-import sys
-from typing import Dict, List, Optional, Any, Tuple
+from typing import TYPE_CHECKING, Dict, List, Any
+
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = logging.getLogger(__name__)
 

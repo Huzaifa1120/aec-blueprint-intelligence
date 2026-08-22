@@ -1,0 +1,32 @@
+#!/bin/sh
+# Pre-commit quality gate — lint, typecheck, format checks.
+# Enable after cloning: git config core.hooksPath .githooks
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+STAGED="$(git diff --cached --name-only --diff-filter=ACMR)"
+
+PY_FILES=$(printf '%s\n' "$STAGED" | grep '\.py$' || true)
+FE_CODE=$(printf '%s\n' "$STAGED" | grep -E '^frontend/.*\.(ts|tsx|js|jsx|mjs|css)$' || true)
+FE_JSON=$(printf '%s\n' "$STAGED" | grep -E '^frontend/[^/]*\.json$' || true)
+
+if [ -n "$PY_FILES" ]; then
+  if [ -f "$ROOT/backend/.venv/Scripts/python.exe" ]; then
+    PY="$ROOT/backend/.venv/Scripts/python"
+  else
+    PY="$ROOT/backend/.venv/bin/python"
+  fi
+  echo "[pre-commit] ruff check (backend)"
+  (cd "$ROOT/backend" && "$PY" -m ruff check app tests)
+fi
+
+if [ -n "$FE_CODE$FE_JSON" ]; then
+  echo "[pre-commit] eslint + tsc + prettier (frontend)"
+  (cd "$ROOT/frontend" && npm run lint >/dev/null && npm run typecheck)
+  if [ -n "$FE_CODE" ]; then
+    (cd "$ROOT/frontend" && npx prettier --check \
+      $(printf '%s\n' "$FE_CODE" $FE_JSON | sed 's|^frontend/||'))
+  fi
+fi
+
+exit 0

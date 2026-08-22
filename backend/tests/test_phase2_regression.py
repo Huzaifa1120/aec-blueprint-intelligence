@@ -13,26 +13,21 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-
-client = TestClient(app)
-
-
-# DB setup for in-memory SQLite — exact pattern from Phase 1 tests
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.main import app
 from app.db.base import Base
-from app.db.models.catalog import Price as PriceModel, LaborRate
 from app.catalog.prices import (
     ingest_material_price,
     ingest_labor_rate,
     compute_boq_item,
-    material_cost,
     labor_hours,
     labor_cost,
     total_cost,
 )
+
+client = TestClient(app)
 
 
 @pytest.fixture(scope="function")

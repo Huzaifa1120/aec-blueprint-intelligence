@@ -13,7 +13,7 @@ proposals that the rules engine / human review may use as hints.
 
 from __future__ import annotations
 
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 
 import numpy as np
 
@@ -239,7 +239,6 @@ def detect_legend_text(
 
     for item in ocr_results:
         text = item["text"].lower()
-        bbox = item["bbox"]
 
         # Heuristics: legend typically in top portion of page, smaller text
         # If text contains legend-related keywords, consider it

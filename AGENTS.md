@@ -38,24 +38,29 @@ Backend — run from `backend/` (so `app` is importable), Git Bash on Windows:
 python -m uvicorn app.main:app --reload --port 8000   # dev server
 python -m pytest -q                                    # tests
 python -m ruff check app tests                         # lint
+python -m ruff format app tests                        # formatter
 ```
 
 Frontend — run from `frontend/`:
 
 ```bash
-npm run dev       # Turbopack dev server, http://localhost:3000
-npm run lint      # eslint
-npm run build     # typechecks (there is no separate typecheck script)
+npm run dev         # Turbopack dev server, http://localhost:3000
+npm run lint        # eslint
+npm run typecheck   # tsc --noEmit (build also typechecks)
+npm run build       # production build = compile + typecheck
+npm run format      # prettier write
+npm run format:check
 ```
 
 Frontend calls the backend at `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`). The two dev servers run independently.
 
 ## Gotchas
 
+- **Pre-commit quality gate:** `.githooks/pre-commit` runs ruff (staged `.py`) and eslint+tsc+prettier (staged frontend code). It is NOT active on fresh clones — enable once with `git config core.hooksPath .githooks`.
 - Single git repo at the root (initialized 2026-08-19); `frontend/.git` was removed so backend + frontend + docs share one history.
-- **`backend/.venv` is missing on this machine (2026-08-22)** — recreate it (`python -m venv backend/.venv`) and reinstall deps before running any backend command.
-- `scikit-learn` is imported by `app/ingestion/vector.py` but not declared in `pyproject.toml`; heavy ML deps (`ultralytics`, `detectron2`, `paddleocr`) are import-gated optionals that degrade gracefully when absent.
+- Sample PDF absent locally → 13 regression tests fail by design until restored (`data/samples/MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf`, obtain from project owner).
+- Heavy ML deps (`ultralytics`, `detectron2`, `paddleocr`) are intentionally import-gated optionals — don't add them to `pyproject.toml`; they get installed ad hoc only when the Phase 2.5 raster spike needs them.
 - `frontend/AGENTS.md` is auto-written by `next dev` and warns that this Next.js major version has breaking changes. Keep that file in diffs and read `node_modules/next/dist/docs/` before writing Next.js code.
-- Use `python -m <tool>` instead of `<tool>.exe` — the console-script exes embed an absolute path that breaks after the venv was moved.
-- Don't `pip install --upgrade pip` inside the running venv (WinError 32 file lock); recreate the venv instead.
+- Use `python -m <tool>` instead of `<tool>.exe` — console-script exes can embed stale absolute paths after a venv move.
+- Don't `pip install --upgrade pip` inside a running venv (WinError 32 file lock); recreate the venv instead.
 - Pip ignores the `[dependency-groups]` in `pyproject.toml`; dev tools (pytest, ruff) are installed explicitly.

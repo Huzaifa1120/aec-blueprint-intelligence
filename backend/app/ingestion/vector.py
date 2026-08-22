@@ -10,7 +10,7 @@ All geometry is deterministic — traceable to source path IDs.
 from __future__ import annotations
 
 import uuid
-from typing import List, Dict, Optional, Tuple, TypedDict
+from typing import List, Dict, Tuple, TypedDict
 from pathlib import Path
 
 import pymupdf  # MUST import pymupdf, never fitz

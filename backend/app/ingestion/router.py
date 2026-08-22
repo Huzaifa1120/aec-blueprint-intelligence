@@ -1,5 +1,4 @@
 from pathlib import Path
-from fastapi import UploadFile, File
 import pymupdf  # always import pymupdf, never fitz
 
 

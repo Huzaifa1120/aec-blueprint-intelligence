@@ -5,6 +5,7 @@ from app.core.config import get_settings
 from app.db.session import db_ping
 
 from app.catalog.router import router as catalog_router
+from app.e2e.router import router as e2e_router
 
 settings = get_settings()
 
@@ -21,7 +22,6 @@ app.add_middleware(
 app.include_router(catalog_router)
 
 # Include E2E pipeline router (Phase 2)
-from app.e2e.router import router as e2e_router
 app.include_router(e2e_router)
 
 

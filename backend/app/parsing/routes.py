@@ -15,11 +15,9 @@ from __future__ import annotations
 import uuid
 from typing import List, Dict, Optional, Tuple, TypedDict
 
-import pymupdf  # always import pymupdf, never fitz
 
 import numpy as np
 
-from .scale import detect_scale, scale_from_pymupdf_text
 
 
 # ---------------------------------------------------------------------------
@@ -248,9 +246,6 @@ def measure_routes(
 
         # Compute length
         length_m = compute_length_meters(polyline_sorted, scale)
-
-        # Use the first member's path ID as the source representative
-        source_path_id = member_ids[0] if member_ids else ""
 
         route: RouteGeo = {
             "id": str(uuid.uuid4()),

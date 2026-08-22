@@ -117,14 +117,9 @@ def test_scale_detection_from_sample() -> None:
 def test_route_measurement_from_clusters() -> None:
     """Test route measurement from parsed clusters."""
     from app.ingestion.vector import parse_pdf
-    from app.parsing.routes import measure_routes
 
     result = parse_pdf(str(SAMPLE))
     scale = result["scale"]
-
-    # Measure routes from access control clusters
-    route_layer_names = ("CONDUIT", "CABLE_TRAY", "PIPE")
-    clusters = [c for c in result["clusters"] if True]  # all clusters for MVP
 
     # This tests the measure_routes function signature and logic
     # (full integration would upload via API and measure actual lengths)
@@ -182,8 +177,6 @@ def test_cost_engine_pure_functions() -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
     from app.db.base import Base
-    from app.db.models.catalog import Material, Price, LaborRate
-    from app.db.session import get_engine as get_db_engine
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -224,7 +217,7 @@ def test_no_blended_accuracy_percentage() -> None:
     Per Rules.md §7: per-line confidence status: MEASURED / DERIVED / ASSUMED
     — never one blended "%".
     """
-    from app.catalog.prices import material_cost, labor_hours, labor_cost, total_cost
+    from app.catalog.prices import material_cost
 
     # Verify that each function produces a single result,
     # not a blended accuracy percentage

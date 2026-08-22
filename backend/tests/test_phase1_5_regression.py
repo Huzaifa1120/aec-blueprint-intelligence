@@ -41,7 +41,6 @@ def test_scanned_pdf_valid_pymupdf() -> None:
         page = doc[0]
 
         # Scanned PDF: low drawing count, images present
-        drawings = page.get_drawings()
         images = page.get_images(full=True)
         text = page.get_text("text").strip()
 
@@ -52,7 +51,7 @@ def test_scanned_pdf_valid_pymupdf() -> None:
         # Extract text via OCR pipeline (phase 1.5)
         # If PaddleOCR available, it should extract some text
         # If not, that's OK — test validates pipeline structure
-        has_extractable_text = len(text) > 0
+        _ = len(text)
         # Don't fail if text is empty — scanned sheets may have limited OCR text
     finally:
         doc.close()
@@ -64,7 +63,6 @@ def test_raster_vs_vector_component_comparison() -> None:
     DoD: scanned sheet produces same component types (may differ in count
     due to raster lower sensitivity, but same symbol types should appear).
     """
-    import numpy as np
 
     # Render the PDF page at high DPI for raster simulation
     from app.raster.renderer import render_page_to_pixmap
