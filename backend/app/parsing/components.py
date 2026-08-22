@@ -18,6 +18,22 @@ from typing import Dict, List
 from app.parsing.layer_map import layer_to_assembly
 
 
+def deduplicate_components(components: List[Dict]) -> List[Dict]:
+    """Deduplicate components by source_path_ids.
+
+    Keeps only one representative per unique source_path_ids subset,
+    preserving order of first appearance.
+    """
+    seen: set = set()
+    unique: List[Dict] = []
+    for comp in components:
+        key = tuple(sorted(comp.get("source_path_ids", [])))
+        if key not in seen:
+            seen.add(key)
+            unique.append(comp)
+    return unique
+
+
 def count_components(
     clusters: List[Dict],
     raw_drawings: List[Dict],
@@ -64,6 +80,8 @@ def count_components(
             }
         )
 
+    # Deduplicate components with identical source_path_ids
+    components = deduplicate_components(components)
     return components
 
 

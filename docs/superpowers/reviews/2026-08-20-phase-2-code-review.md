@@ -22,6 +22,7 @@
 | `pytest` test green | ✅ All Phase 2 tests pass | |
 | `ruff check` pass | ✅ All 14 files pass | |
 | Per-document legend compliance | ✅ No universal symbol detector | |
+| **Fallow dead-code analysis** | 1 dead file, 1 unused dependency (react) | ⚠️ 2 issues found
 
 ---
 
@@ -172,8 +173,11 @@ The Phase 2 codebase is well-structured, fully compliant with all non-negotiable
 - ✅ YAML-driven rules (not hardcoded)
 - ✅ Per-document legend matching (no universal symbol detector)
 - ✅ All 16 trap constraints passed
+- ✅ Fallow dead-code analysis performed; 2 issues identified and documented
 
 #### Minor Improvements (optional)
+- ✨ Fix unused ReviewOverlay.tsx file (dead code — remove or connect to routing)
+- ✨ Address unused `react` dependency
 - ✨ Consider adding docstrings to new modules (router.py, prices.py, router.py) for better IDE support
 - ✨ Connect ReviewOverlay to Next.js routing (P1, 15 min)
 - ✨ Monitor F821 exception patterns as codebase evolves
@@ -191,11 +195,11 @@ The Phase 2 codebase is well-structured, fully compliant with all non-negotiable
 | Field | Value |
 |-------|-------|
 | **Reviewer** | opencode (AI agent) |
-| **Tools used** | ruff v10.x, pytest v8.x, manual code analysis |
+| **Tools used** | ruff v10.x, pytest v8.x, fallow v3.17.0, manual code analysis |
 | **Files analyzed** | 14 Python files + 8 YAML files + 3 test files + 2 documentation files |
 | **Trap constraints** | 16/16 passed |
 | **Date** | 2026-08-20 |
-| **Next review** | After Phase 2.5 start or Phase 3 start |
+| **Next review** | After Phase 2.5 start or Phase 3 start; re-run fallow to verify dead-code < 5% |
 
 --- 
 
