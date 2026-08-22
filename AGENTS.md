@@ -5,7 +5,7 @@ AEC Blueprint Intelligence System — construction quantity takeoff (QTO) / cost
 ## Read first
 
 - `docs/Memory.md` — session-state tracker; **read it before starting work and update it at the end of every session**.
-- `docs/Architecture.md`, `docs/Rules.md`, `docs/Phases.md`, `docs/PRD.md`, `docs/Design.md` — docs of record. Current phase: 2 ✅ complete; **next: Phase 2.5 — Spec v3 Alignment** (`Phases.md`).
+- `docs/Architecture.md`, `docs/Rules.md`, `docs/Phases.md`, `docs/PRD.md`, `docs/Design.md` — docs of record. Current phase: 2.5 ✅ complete (2026-08-23); **next: Phase 3 — Mechanical (HVAC)** (`Phases.md`).
 - `docs/AEC-Blueprint-System-Design-Spec-v3.md` — **sole source of truth**; supersedes v2, the original spec, and the Phase 3 addendum. If a task conflicts with it, it wins unless explicitly updated.
 - `docs/architecture_decision.md` — architecture decision analysis (the "convergence" decision on hybrid vector-first approach).
 - `docs/superpowers/reviews/` — code review logs (Phase 0, 1, 1.5, 2, Frontend, Backend); ruff/pytest/fallow compliance & trap constraints.
