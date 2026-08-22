@@ -19,6 +19,7 @@ class Component(Base):
     y: Mapped[float]
     confidence_status: Mapped[str] = mapped_column(String(20), default="MEASURED")
     confidence_score: Mapped[float] = mapped_column(default=1.0)
+    source_quality: Mapped[str] = mapped_column(String(20), default="layered_vector")
 
     sheet: Mapped["Sheet"] = relationship(back_populates="components")
     measurements: Mapped[list["Measurement"]] = relationship(
@@ -35,6 +36,7 @@ class Route(Base):
     length_m: Mapped[float | None]
     confidence_status: Mapped[str] = mapped_column(String(20), default="MEASURED")
     confidence_score: Mapped[float] = mapped_column(default=1.0)
+    source_quality: Mapped[str] = mapped_column(String(20), default="layered_vector")
 
     sheet: Mapped["Sheet"] = relationship(back_populates="routes")
     measurements: Mapped[list["Measurement"]] = relationship(
@@ -51,6 +53,7 @@ class Space(Base):
     area_m2: Mapped[float | None]
     confidence_status: Mapped[str] = mapped_column(String(20), default="MEASURED")
     confidence_score: Mapped[float] = mapped_column(default=1.0)
+    source_quality: Mapped[str] = mapped_column(String(20), default="layered_vector")
 
     sheet: Mapped["Sheet"] = relationship(back_populates="spaces")
     measurements: Mapped[list["Measurement"]] = relationship(
