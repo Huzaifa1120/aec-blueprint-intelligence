@@ -40,6 +40,23 @@ def classify_upload(file_path: str) -> dict:
         ocg_names = [v.get("name", "") for v in ocgs.values()]
         has_text = page.get_text("text").strip() != ""
 
+        from app.ingestion.quality_gate import (
+            VERDICT_DEGRADED,
+            VERDICT_RASTER,
+            assess_quality,
+        )
+
+        # Input Quality Gate (spec v3 §7.2): a vector-looking PDF must prove
+        # it carries layer data before the happy path. assess_quality is
+        # fail-closed internally; the catch here is belt-and-braces only.
+        try:
+            gate = assess_quality(file_path)
+        except Exception:
+            gate = {"verdict": VERDICT_RASTER, "metrics": None}
+        source_quality = gate["verdict"]
+        degraded = source_quality == VERDICT_DEGRADED
+        gate_metrics = gate["metrics"]
+
         # Detect electrical layers from OCG registry
         detected_electrical_layers = [
             name for name in ocg_names if name in ELECTRICAL_LAYER_NAMES
@@ -59,6 +76,9 @@ def classify_upload(file_path: str) -> dict:
                 "image_count": image_score,
                 "has_text": has_text,
                 "detected_electrical_layers": detected_electrical_layers,
+                "source_quality": source_quality,
+                "degraded": degraded,
+                "gate_metrics": gate_metrics,
                 "reason": "High vector count + extractable text — proceed with vector parsing",
             }
         elif vector_score < 100 and image_score > 0 and not has_text:
@@ -68,6 +88,9 @@ def classify_upload(file_path: str) -> dict:
                 "drawing_count": vector_score,
                 "image_count": image_score,
                 "has_text": has_text,
+                "source_quality": gate["verdict"],
+                "degraded": False,
+                "gate_metrics": gate_metrics,
                 "reason": "Dominantly raster — defer to Phase 1.5 CV fallback",
             }
         else:
@@ -79,6 +102,9 @@ def classify_upload(file_path: str) -> dict:
                 "image_count": image_score,
                 "has_text": has_text,
                 "detected_electrical_layers": detected_electrical_layers,
+                "source_quality": source_quality,
+                "degraded": degraded,
+                "gate_metrics": gate_metrics,
                 "reason": "Ambiguous classification — defaulting to vector path for MVP",
             }
     finally:
