@@ -36,7 +36,7 @@ Status legend: ⬜ not started · 🟦 in progress · ✅ done
 
 *Definition of Done met. Phase 1 MVP proven off sample sheet `MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf`.*
 
-## Phase 1.5 — Raster / CV fallback ✅
+## Phase 1.5 — Raster / CV fallback ✅ *(technique superseded by spec v3 — see Phase 2.5)*
 
 - Render page → image at high DPI; OCR (PaddleOCR) for text/dimensions/legend.
 - YOLOv8 shape-cluster detection + **per-document legend** few-shot matching.
@@ -45,6 +45,8 @@ Status legend: ⬜ not started · 🟦 in progress · ✅ done
 - **DoD met:** scanned copy of the sample sheet produces the same components with confidence-tiered (lower) ratings.
 
 *Phase 1.5 MVP proven off sample sheet `MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf`. Raster fallback is not required for MVP (Phase 1) but is the natural continuation for scanned PDF support.*
+
+> **Spec v3 re-scope (2026-08-22):** the YOLOv8-based technique above is superseded — Ultralytics YOLOv8 is removed from the default stack (AGPL-3.0 requires an Enterprise License even for internal-only proprietary use, vendor-confirmed). The raster path moves to the two-technique split (classical-CV legend matching via OpenCV `matchTemplate`/ORB-SIFT + Detectron2 region segmentation + rotation-aware OCR) and must be re-proven by the Phase 2.5 raster spike against vector-derived ground truth. The historical record above is retained as-is.
 
 ## Phase 2 — Full Electrical discipline ✅
 
@@ -55,7 +57,7 @@ Status legend: ⬜ not started · 🟦 in progress · ✅ done
 ### 2.1 What's Been Implemented (Planning + Initial Implementation):
 
 - **9 electrical component assembly rule YAML files** in `data/assemblies/`:
-  `access_control_door.yaml`, `switch.yaml`, `power_outlet.yaml`, 
+  8 rule files: `access_control_door.yaml`, `switch.yaml`, `power_outlet.yaml`, 
   `distribution_board.yaml`, `cable_tray.yaml`, `conduit.yaml`,
   `lighting_outlet.yaml`, `socket_outlet.yaml`
   - All YAML-driven (not hardcoded) — adding new assembly types requires YAML edit only
@@ -114,6 +116,23 @@ Status legend: ⬜ not started · 🟦 in progress · ✅ done
 
 *Phase 2 implementation complete — regression suite (12/12) green; EP3+YR2 DoD gates locked in.*
 
+## Phase 2.5 — Spec v3 Alignment 🟦 (planned next)
+
+**Goal:** bring the codebase in line with `AEC-Blueprint-System-Design-Spec-v3.md` before starting Phase 3. The v3 revision changed four things that touch existing code, and added two new obligations. Nothing here re-opens Phase 1/2 results — it hardens them.
+
+1. **Input Quality Gate** (`app/ingestion/quality_gate.py`, new; spec §7.2):
+   - Score layer richness on vector-path uploads: distinct OCG count, fraction of paths with non-null `layer`, extractable legend/schedule text.
+   - Below threshold → flag `degraded_vector`; loop-back message + `POST /drawings/{id}/request-reexport` (closed deployment); otherwise route to raster with lower base-confidence multiplier.
+   - Spike: deliberately produce a flattened version of the sample sheet (print-to-PDF / discard-hidden-layers export) and assert the gate flags it.
+   - Endpoints: `GET /drawings/{id}/quality`, `POST /drawings/{id}/request-reexport`.
+2. **Clustering migration** (`app/ingestion/vector.py`; spec §7.4): replace scikit-learn DBSCAN (`eps=5.0`) with deterministic distance-threshold connected-components (union-find), threshold derived per sheet from the smallest legend symbol's real-world size. Regression: same component counts on the sample sheet before/after.
+3. **Raster path re-proof** (spec §12a Stage 1.5 spike): extract glyph templates from the sample's legend region → classical template matching against a rendered copy of the same sheet → compare counts to the vector ground truth from Phases 0–2. Do **not** build Detectron2 segmentation yet. Retire/quarantine the ultralytics import gate (`app/raster/yolo_detection.py`) so YOLOv8 can never enter the default stack.
+4. **Schema migration**: add `source_quality` column (`layered_vector` | `degraded_vector` | `raster`) to `COMPONENT`, `ROUTE`, `SPACE` (+ `SCHEDULE_BLOCK` when created); Alembic migration; populate existing rows as `layered_vector`.
+5. **Review-time instrumentation** (spec §7.13): log review time per sheet and per confidence tier; expose `GET /projects/{id}/review-metrics`. Agree a target threshold with the business stakeholder before calling this done.
+6. **Dependency hygiene**: declare `scikit-learn` in `pyproject.toml` or drop it after task 2 removes the last DBSCAN use.
+
+**DoD:** quality gate flags a deliberately flattened sample and passes a layered one; clustering migration reproduces Phase 1/2 component counts exactly; raster spike counts within agreed tolerance of vector ground truth; no ultralytics import outside a quarantined module; every persisted measurement carries `source_quality`; ruff + full pytest suite green.
+
 ### Known Phase 1 test bugs
 
 Two Phase 1 regression tests were fixed during Phase 2 validation:
@@ -165,6 +184,8 @@ All 10 Phase 1 regression tests now pass (10/10 green). The Phase 1 DoD is met a
 
 ## Standing rule
 
-- Raster fallback is **Phase 1.5**, not required for MVP.
+- Never assume incoming files are layer-rich vector PDFs; run the Input Quality Gate first (spec v3 §7.2, §5.5). Flattened input is common, not an edge case.
+- No detector that requires an unbudgeted commercial license (e.g. Ultralytics YOLOv8 / AGPL) enters the default stack.
+- Raster fallback was **Phase 1.5** (not required for MVP); under spec v3 its technique is re-proven via the Phase 2.5 spike before production reliance.
 - Raw-material (concrete/rebar) estimation never happens from a single-discipline sheet.
 - Only after individual disciplines are independently reliable may the system claim "upload anything, get a whole-building estimate."
