@@ -116,22 +116,28 @@ Status legend: ⬜ not started · 🟦 in progress · ✅ done
 
 *Phase 2 implementation complete — regression suite (12/12) green; EP3+YR2 DoD gates locked in.*
 
-## Phase 2.5 — Spec v3 Alignment 🟦 (planned next)
+## Phase 2.5 — Spec v3 Alignment ✅ *(completed 2026-08-23)*
 
 **Goal:** bring the codebase in line with `AEC-Blueprint-System-Design-Spec-v3.md` before starting Phase 3. The v3 revision changed four things that touch existing code, and added two new obligations. Nothing here re-opens Phase 1/2 results — it hardens them.
 
-1. **Input Quality Gate** (`app/ingestion/quality_gate.py`, new; spec §7.2):
+1. **Input Quality Gate** (`app/ingestion/quality_gate.py`, new; spec §7.2) — ✅ done:
    - Score layer richness on vector-path uploads: distinct OCG count, fraction of paths with non-null `layer`, extractable legend/schedule text.
    - Below threshold → flag `degraded_vector`; loop-back message + `POST /drawings/{id}/request-reexport` (closed deployment); otherwise route to raster with lower base-confidence multiplier.
    - Spike: deliberately produce a flattened version of the sample sheet (print-to-PDF / discard-hidden-layers export) and assert the gate flags it.
    - Endpoints: `GET /drawings/{id}/quality`, `POST /drawings/{id}/request-reexport`.
-2. **Clustering migration** (`app/ingestion/vector.py`; spec §7.4): replace scikit-learn DBSCAN (`eps=5.0`) with deterministic distance-threshold connected-components (union-find), threshold derived per sheet from the smallest legend symbol's real-world size. Regression: same component counts on the sample sheet before/after.
-3. **Raster path re-proof** (spec §12a Stage 1.5 spike): extract glyph templates from the sample's legend region → classical template matching against a rendered copy of the same sheet → compare counts to the vector ground truth from Phases 0–2. Do **not** build Detectron2 segmentation yet. Retire/quarantine the ultralytics import gate (`app/raster/yolo_detection.py`) so YOLOv8 can never enter the default stack.
-4. **Schema migration**: add `source_quality` column (`layered_vector` | `degraded_vector` | `raster`) to `COMPONENT`, `ROUTE`, `SPACE` (+ `SCHEDULE_BLOCK` when created); Alembic migration; populate existing rows as `layered_vector`.
-5. **Review-time instrumentation** (spec §7.13): log review time per sheet and per confidence tier; expose `GET /projects/{id}/review-metrics`. Agree a target threshold with the business stakeholder before calling this done.
-6. **Dependency hygiene**: declare `scikit-learn` in `pyproject.toml` or drop it after task 2 removes the last DBSCAN use.
+2. **Clustering migration** (`app/ingestion/vector.py`; spec §7.4) — ✅ done: replace scikit-learn DBSCAN (`eps=5.0`) with deterministic distance-threshold connected-components (union-find), threshold derived per sheet from the smallest legend symbol's real-world size. Regression: same component counts on the sample sheet before/after.
+3. **Raster path re-proof** (spec §12a Stage 1.5 spike) — ✅ closed as documented dead-end (human ruling A, amendment below): extract glyph templates from the sample's legend region → classical template matching against a rendered copy of the same sheet → compare counts to the vector ground truth from Phases 0–2. Do **not** build Detectron2 segmentation yet. Retire/quarantine the ultralytics import gate (`app/raster/yolo_detection.py`) so YOLOv8 can never enter the default stack.
+4. **Schema migration** — ✅ done: add `source_quality` column (`layered_vector` | `degraded_vector` | `raster`) to `COMPONENT`, `ROUTE`, `SPACE` (+ `SCHEDULE_BLOCK` when created); Alembic migration; populate existing rows as `layered_vector`.
+5. **Review-time instrumentation** (spec §7.13) — ✅ done: log review time per sheet and per confidence tier; expose `GET /projects/{id}/review-metrics`. Agree a target threshold with the business stakeholder before calling this done.
+6. **Dependency hygiene** — ✅ done (resolved: removed): declare `scikit-learn` in `pyproject.toml` or drop it after task 2 removes the last DBSCAN use.
 
 **DoD:** quality gate flags a deliberately flattened sample and passes a layered one; clustering migration reproduces Phase 1/2 component counts exactly; raster spike counts within agreed tolerance of vector ground truth; no ultralytics import outside a quarantined module; every persisted measurement carries `source_quality`; ruff + full pytest suite green.
+
+**Amendment 2026-08-23 (human ruling A):** the raster-spike tolerance line closes as a documented dead-end rather than a passing count — NCC template matching measured non-discriminative (363× false positives at ceiling 0.903; hollow legend text blocks labeling). Raster path remains quarantined; ORB/SIFT designated successor (spec v3 §7.7A); revisit triggers on first real degraded upload. Evidence: `docs/superpowers/reviews/2026-08-22-raster-spike-report.md`.
+
+*Landed side-effects:* clustering switchover re-baselined component counts under human approval (tie-break filter applied; door 2 / tray 1 / lighting 26); route-length units corrected pt → paper-mm → real-m (previous magnitudes were physically impossible; cable tray now 0.752 m).
+
+*Phase 2.5 complete 2026-08-23 — all six items landed on `feature/phase-2.5-implementation` (HEAD `979a7c5`); full suite green incl. one expected xfail (raster spike, ruling A); ruff clean.*
 
 ### Known Phase 1 test bugs
 
@@ -186,6 +192,6 @@ All 10 Phase 1 regression tests now pass (10/10 green). The Phase 1 DoD is met a
 
 - Never assume incoming files are layer-rich vector PDFs; run the Input Quality Gate first (spec v3 §7.2, §5.5). Flattened input is common, not an edge case.
 - No detector that requires an unbudgeted commercial license (e.g. Ultralytics YOLOv8 / AGPL) enters the default stack.
-- Raster fallback was **Phase 1.5** (not required for MVP); under spec v3 its technique is re-proven via the Phase 2.5 spike before production reliance.
+- Raster fallback was **Phase 1.5** (not required for MVP); the Phase 2.5 spike measured NCC template matching non-discriminative (human ruling A, 2026-08-23), so the raster path stays **quarantined** — ORB/SIFT is the designated successor technique (spec v3 §7.7A); revisit triggers on the first real degraded upload.
 - Raw-material (concrete/rebar) estimation never happens from a single-discipline sheet.
 - Only after individual disciplines are independently reliable may the system claim "upload anything, get a whole-building estimate."

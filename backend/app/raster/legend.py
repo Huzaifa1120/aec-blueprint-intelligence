@@ -13,7 +13,7 @@ against that legend. No universal symbol classification is performed.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, Optional, Any, Tuple
 
 import numpy as np
 

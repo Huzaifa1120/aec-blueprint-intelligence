@@ -18,10 +18,9 @@ Dependencies:
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import axios from "axios"
 
 // pdf.js types — we import the canvas type loosely
-// @ts-ignore — pdf.js types may vary by version
+// @ts-expect-error — pdf.js types may vary by version
 import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js"
 
 type MeasurementStatus = "MEASURED" | "DERIVED" | "ASSUMED"
@@ -33,6 +32,7 @@ type BohqItem = {
   unit_cost: number
   total_cost: number
   confidence_status: MeasurementStatus
+  component_type?: string
   calculation_method?: string
   rule_version?: string
 }
@@ -41,8 +41,8 @@ type ComponentOverlay = {
   id: string
   type: "card_reader" | "door" | "magnetic_lock" | "push_button" | "door_controller"
   label: string
-  x: number  // PDF page coordinate x (scaled pixels)
-  y: number  // PDF page coordinate y (scaled pixels)
+  x: number // PDF page coordinate x (scaled pixels)
+  y: number // PDF page coordinate y (scaled pixels)
   width: number
   height: number
   confidence_status: MeasurementStatus
@@ -50,16 +50,16 @@ type ComponentOverlay = {
 }
 
 type ReviewOverlayProps = {
-  pdfUrl: string  // URL to the uploaded PDF
-  items: BohqItem[]  // BOQ items with confidence status
-  overlays: ComponentOverlay[]  // Geometry overlay positions
+  pdfUrl: string // URL to the uploaded PDF
+  items: BohqItem[] // BOQ items with confidence status
+  overlays: ComponentOverlay[] // Geometry overlay positions
   onItemAction: (itemId: string, action: "accept" | "correct" | "reject") => void
   onItemCorrect: (itemId: string, newQuantity: number) => void
   projectId?: string
 }
 
 type UseOverlayReturn = {
-  pdfRef: any
+  pdfRef: React.RefObject<HTMLCanvasElement | null>
   pageNumber: number
   isLoading: boolean
   error: string | null
@@ -69,7 +69,7 @@ type UseOverlayReturn = {
  * Hook: PDF loading with pdf.js
  */
 function usePdfLoading(pdfUrl: string): UseOverlayReturn {
-  const pdfRef = useRef<any>(null)
+  const pdfRef = useRef<HTMLCanvasElement | null>(null)
   const [pageNumber, setPageNumber] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -86,14 +86,13 @@ function usePdfLoading(pdfUrl: string): UseOverlayReturn {
         const page = pdf.getPage(1)
         const viewport = page.getViewport({ scale: 1.5 })
 
-        const canvasRef = pdfRef.current as HTMLCanvasElement
-        if (!canvasRef) {
+        if (!pdfRef.current) {
           const canvas = document.createElement("canvas")
-          canvasRef.current = canvas
+          pdfRef.current = canvas
           document.body.appendChild(canvas)
         }
 
-        const canvas = pdfRef.current
+        const canvas = pdfRef.current as HTMLCanvasElement
         const ctx = canvas.getContext("2d")
 
         canvas.height = viewport.height
@@ -137,7 +136,7 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
   onItemCorrect,
   projectId,
 }) => {
-  const { pdfRef, pageNumber, isLoading, error } = usePdfLoading(pdfUrl)
+  const { pdfRef, isLoading, error } = usePdfLoading(pdfUrl)
   const router = useRouter()
   const [selectedItem, setSelectedItem] = useState<string | null>(null)
   const [showCorrectModal, setShowCorrectModal] = useState(false)
@@ -148,9 +147,7 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
     if (!projectId) return
     ;(async () => {
       try {
-        const resp = await axios.get(
-          `/api/v1/drawings/${projectId}/model`,
-        )
+        await fetch(`/api/v1/drawings/${projectId}/model`)
         // Merge fetched model with provided items
         // (implementation depends on backend API shape)
       } catch (e) {
@@ -160,23 +157,11 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
   }, [projectId])
 
   // Handle item click → select for highlighting
-  const handleItemClick = useCallback(
-    (itemId: string) => {
-      setSelectedItem(itemId)
-    },
-    [],
-  )
+  const handleItemClick = useCallback((itemId: string) => {
+    setSelectedItem(itemId)
+  }, [])
 
-  // Handle accept action
-  const handleAccept = useCallback(
-    (itemId: string) => {
-      onItemAction(itemId, "accept")
-      setSelectedItem(null)
-    },
-    [onItemAction],
-  )
-
-  // Handle correct action → open modal with current quantity
+  // Handle correct action
   const handleCorrect = useCallback(
     (itemId: string) => {
       const item = items.find((i) => i.id === itemId)
@@ -216,17 +201,16 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
   }, [])
 
   // Disable reject for MEASURED items (bulk-accept rule)
-  const canReject = items.some(
-    (item) => item.confidence_status === "ASSUMED",
-  )
+  const canReject = items.some((item) => item.confidence_status === "ASSUMED")
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="border-b border-gray-200 p-4">
         <h1 className="text-2xl font-bold">
-          {" "}{projectId ? "Review Estimate — " + projectId : "Review Takeoff"}
-        }{" "}
+          {" "}
+          {projectId ? "Review Estimate — " + projectId : "Review Takeoff"}{" "}
+        </h1>
         <button
           onClick={() => router.back()}
           className="ml-4 inline-flex items-center px-3 py-1.5 text-sm font-medium text-blue-600 rounded hover:bg-blue-100"
@@ -260,48 +244,30 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
         )}
 
         {/* PDF Canvas */}
-        {pdfRef.current && (
-          <canvas
-            ref={pdfRef}
-            className="block"
-            style={{
-              width: "100%",
-              height: "auto",
-            }}
-          />
-        )}
+        <canvas
+          ref={pdfRef}
+          className={`block ${isLoading ? "invisible" : ""}`}
+          style={{
+            width: "100%",
+            height: "auto",
+          }}
+        />
 
         {/* Overlay: highlight selected item */}
         {selectedItem && (
-          <svg
-            className="absolute inset-0 pointer-events-none"
-            aria-label="Highlighted selection"
-          >
+          <svg className="absolute inset-0 pointer-events-none" aria-label="Highlighted selection">
             <rect
-              x={overlays
-                .filter((o) => o.id === selectedItem)
-                .map((o) => o.x)[0] || 0}
-              y={overlays
-                .filter((o) => o.id === selectedItem)
-                .map((o) => o.y)[0] || 0}
-              width={overlays
-                .filter((o) => o.id === selectedItem)
-                .map((o) => o.width)[0] || 0}
-              height={overlays
-                .filter((o) => o.id === selectedItem)
-                .map((o) => o.height)[0] || 0}
-              stroke="rgba(251, 191, 36, 0.8)"  /* amber-400 */
+              x={overlays.filter((o) => o.id === selectedItem).map((o) => o.x)[0] || 0}
+              y={overlays.filter((o) => o.id === selectedItem).map((o) => o.y)[0] || 0}
+              width={overlays.filter((o) => o.id === selectedItem).map((o) => o.width)[0] || 0}
+              height={overlays.filter((o) => o.id === selectedItem).map((o) => o.height)[0] || 0}
+              stroke="rgba(251, 191, 36, 0.8)" /* amber-400 */
               strokeWidth={2}
               fill="rgba(251, 191, 36, 0.15)"
             />
-            <text
-              x={0}
-              y={12}
-              fill="rgb(251, 191, 36)"
-              fontSize={12}
-              fontFamily="sans-serif"
-            >
-              {" "}{selectedItem}
+            <text x={0} y={12} fill="rgb(251, 191, 36)" fontSize={12} fontFamily="sans-serif">
+              {" "}
+              {selectedItem}
             </text>
           </svg>
         )}
@@ -322,20 +288,18 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
                   overlay.confidence_status === "MEASURED"
                     ? "rgb(34, 197, 94)" /* green-500 */
                     : overlay.confidence_status === "DERIVED"
-                    ? "rgb(236, 72, 153)" /* pink-500 */
-                    : "rgb(139, 92, 246)" /* violet-500 */
+                      ? "rgb(236, 72, 153)" /* pink-500 */
+                      : "rgb(139, 92, 246)" /* violet-500 */
                 }
                 strokeWidth={1}
                 fill={
                   overlay.confidence_status === "MEASURED"
                     ? "rgba(34, 197, 94, 0.1)"
                     : overlay.confidence_status === "DERIVED"
-                    ? "rgba(236, 72, 153, 0.1)"
-                    : "rgba(139, 92, 246, 0.1)"
+                      ? "rgba(236, 72, 153, 0.1)"
+                      : "rgba(139, 92, 246, 0.1)"
                 }
-                aria-label={`${
-                  overlay.type
-                } — ${overlay.confidence_status}`}
+                aria-label={`${overlay.type} — ${overlay.confidence_status}`}
               />
               <text
                 x={overlay.x + 4}
@@ -344,13 +308,14 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
                   overlay.confidence_status === "MEASURED"
                     ? "rgb(34, 197, 94)"
                     : overlay.confidence_status === "DERIVED"
-                    ? "rgb(236, 72, 153)"
-                    : "rgb(139, 92, 246)"
+                      ? "rgb(236, 72, 153)"
+                      : "rgb(139, 92, 246)"
                 }
                 fontSize={10}
                 fontFamily="sans-serif"
               >
-                {" "}{overlay.type}
+                {" "}
+                {overlay.type}
               </text>
             </g>
           ))}
@@ -365,7 +330,8 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
           className="flex-1 inline-flex items-center px-4 py-2 text-sm font-medium text-green-600 rounded bg-green-100 hover:bg-green-200"
           aria-label="Bulk accept all items"
         >
-          {" "}Accept All{" "}
+          {" "}
+          Accept All{" "}
         </button>
 
         <button
@@ -374,7 +340,8 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
           className="flex-1 inline-flex items-center px-4 py-2 text-sm font-medium text-red-600 rounded bg-red-100 hover:bg-red-200"
           aria-label="Bulk reject all items"
         >
-          {" "}Reject All{" "}
+          {" "}
+          Reject All{" "}
         </button>
 
         {/* Per-item actions */}
@@ -382,25 +349,25 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
           <div key={item.id} className="flex items-center gap-2">
             <button
               onClick={() => handleItemClick(item.id)}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-sm ${
-                selectedItem === item.id
-                  ? "bg-gray-200"
-                  : "text-gray-400 hover:bg-gray-100"
-              }"
+              className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${
+                selectedItem === item.id ? "bg-gray-200" : "text-gray-400 hover:bg-gray-100"
+              }`}
               aria-label={`Select ${item.id} for highlighting`}
             >
               {"⚐"}
             </button>
             <span className="truncate w-24">{item.component_type || item.id}</span>
-            <span className={`
+            <span
+              className={`
               text-xs font-medium ${
                 item.confidence_status === "MEASURED"
                   ? "text-green-600"
                   : item.confidence_status === "DERIVED"
-                  ? "text-pink-500"
-                  : "text-violet-500"
+                    ? "text-pink-500"
+                    : "text-violet-500"
               }
-            `}>
+            `}
+            >
               {item.confidence_status}
             </span>
             <button
@@ -424,31 +391,18 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
 
         {/* Correct modal */}
         {showCorrectModal && (
-          <div
-            className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-          >
-            <div
-              className="bg-white rounded-lg p-6 max-w-sm w-full shadow-xl"
-            >
-              <h3 className="text-xl font-bold mb-4">
-                {" "}Correct Quantity{" "}
-              </h3>
-              <form
-                onSubmit={handleCorrectApply}
-                className="space-y-4"
-              >
+          <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg p-6 max-w-sm w-full shadow-xl">
+              <h3 className="text-xl font-bold mb-4"> Correct Quantity </h3>
+              <form onSubmit={handleCorrectApply} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">
-                    {" "}New quantity{" "}
-                  </label>
+                  <label className="block text-sm font-medium mb-1"> New quantity </label>
                   <input
                     type="number"
                     min={0}
                     step={0.1}
                     value={newQuantity}
-                    onChange={(e) =>
-                      setNewQuantity(Number(e.target.value) || 0),
-                    }
+                    onChange={(e) => setNewQuantity(Number(e.target.value) || 0)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus-outline"
                     required
                   />
@@ -458,14 +412,16 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
                     type="submit"
                     className="flex-1 inline-flex items-center px-4 py-2 text-sm font-medium text-green-600 rounded bg-green-100 hover:bg-green-200"
                   >
-                    {" "}Apply{" "}
+                    {" "}
+                    Apply{" "}
                   </button>
                   <button
                     type="button"
                     onClick={handleCorrectCancel}
                     className="flex-1 inline-flex items-center px-4 py-2 text-sm font-medium text-gray-500 rounded bg-gray-100 hover:bg-gray-100"
                   >
-                    {" "}Cancel{" "}
+                    {" "}
+                    Cancel{" "}
                   </button>
                 </div>
               </form>
@@ -481,10 +437,4 @@ export const ReviewOverlay: React.FC<ReviewOverlayProps> = ({
  * Export types for external use
  * -------------------------------------------------------------------------*/
 
-export type {
-  MeasurementStatus,
-  BohqItem,
-  ComponentOverlay,
-  ReviewOverlayProps,
-  UseOverlayReturn,
-}
+export type { MeasurementStatus, BohqItem, ComponentOverlay, ReviewOverlayProps, UseOverlayReturn }

@@ -14,7 +14,7 @@ then fallback to "unknown" — never a universal symbol detector.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Any, Tuple
 
 import numpy as np
 
@@ -25,10 +25,10 @@ import numpy as np
 SEGMENTATION_AVAILABLE = False
 
 try:
-    import detectron2
-    from detectron2.engine import DefaultPredictor
-    from detectron2.config import Configuration
-    from detectron2 import model_zoo
+    import detectron2  # noqa: F401
+    from detectron2.engine import DefaultPredictor  # noqa: F401
+    from detectron2.config import Configuration  # noqa: F401
+    from detectron2 import model_zoo  # noqa: F401
     SEGMENTATION_AVAILABLE = True
 except ImportError:
     # detectron2 not installed — segmentation is unavailable but Phase

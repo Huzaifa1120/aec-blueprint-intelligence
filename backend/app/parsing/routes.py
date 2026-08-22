@@ -15,11 +15,9 @@ from __future__ import annotations
 import uuid
 from typing import List, Dict, Optional, Tuple, TypedDict
 
-import pymupdf  # always import pymupdf, never fitz
 
 import numpy as np
 
-from .scale import detect_scale, scale_from_pymupdf_text
 
 
 # ---------------------------------------------------------------------------
@@ -46,18 +44,20 @@ def compute_length_meters(
     polyline: List[Tuple[float, float]],
     scale: str,
 ) -> float:
-    """Compute total length of an ordered polyline in meters given a scale.
+    """Compute total length of an ordered polyline in real-world meters.
 
-    Scale format: "1:100" means 1 PDF unit = 100 real-world units.
-    Conversion: real_length = measured_pdf_length * scale_numerator
+    Polyline coordinates are PDF user-space points (1/72 inch). The chain:
+      paper-mm = points × 25.4/72
+      real-mm  = paper-mm × scale_denominator   (e.g. 1:100 → ×100)
+      real-m   = real-mm / 1000
+    Net factor = denominator × 25.4 / (72 × 1000).
 
     Args:
-        polyline: ordered list of (x, y) pairs in PDF user units
+        polyline: ordered list of (x, y) pairs in PDF user units (points)
         scale: scale string e.g. "1:100"
 
     Returns:
-        Total length in meters (assuming PDF units are in meters at scale 1:1)
-        — adjusted by the scale denominator.
+        Total length in real meters at the given drawing scale.
     """
     if len(polyline) < 2:
         return 0.0
@@ -76,13 +76,10 @@ def compute_length_meters(
     except (IndexError, ValueError):
         denominator = 1.0  # fallback: assume 1:1
 
-    # PDF units * scale denominator = real-world meters
-    # e.g. if PDF length = 10 units, scale 1:100 → 10 * 100 = 1000 real units
-    # If we assume PDF units are cm at 1:1, then 10cm * 100 = 1000cm = 10m
-    # For now, treat PDF units as meters at 1:1, multiply by denominator to get meters
-    # Actually: at scale 1:100, 1 PDF unit = 100 real units.
-    # So measured_length_pdf * 100 = real_length
-    real_length = total_points * denominator
+    # corrected 2026-08-22: pt→paper-mm→real-m conversion
+    # (was treating pt as meters; physically impossible outputs,
+    # see tray-route-investigation.md)
+    real_length = total_points * denominator * 25.4 / (72.0 * 1000.0)
 
     return round(real_length, 3)
 
@@ -191,9 +188,14 @@ def measure_routes(
     scale: str,
     route_layer_names: Tuple[str, ...] = ("CONDUIT", "CABLE_TRAY", "PIPE"),
 ) -> List[RouteGeo]:
-    """Measure cable trunk / conduit lengths from clustered access control layer paths.
+    """Measure cable trunk / conduit lengths from clustered route-layer paths.
 
-    For each cluster that belongs to a route layer, extract the path's polyline,
+    Every cluster on a route layer — including singleton clusters — is a
+    route candidate: with union-find clustering (spec v3 §7.4) there is no
+    noise concept, and tray/conduit polylines legitimately form single-path
+    clusters. Dedup by source_path_ids still applies downstream.
+
+    For each route-layer cluster, extract the paths' polyline,
     compute length using the detected scale, and return RouteGeo objects.
 
     Constraints enforced:
@@ -210,12 +212,7 @@ def measure_routes(
     }
 
     for cluster in clusters:
-        cluster_id = cluster["cluster_id"]
         member_ids = cluster.get("member_path_ids", [])
-
-        # Skip noise clusters (cluster_id == -1 with single paths)
-        if cluster_id == -1 and len(member_ids) <= 1:
-            continue
 
         # Determine the layer from the first member path
         member_path = path_lookup.get(member_ids[0], {})
@@ -236,27 +233,36 @@ def measure_routes(
                 part = extract_polyline_from_items(items)
             else:
                 part = extract_polyline_from_path(path_obj)
+            if not part:
+                continue
+            if not polyline_parts:
+                polyline_parts.extend(part)
+                continue
+            # Nearest-end continuation: keep each path's internal item order,
+            # reversing the whole incoming path only when its far end sits
+            # nearer to the chain's running endpoint than its near end.
+            last_x, last_y = polyline_parts[-1]
+            start_x, start_y = part[0]
+            end_x, end_y = part[-1]
+            d_start = np.hypot(start_x - last_x, start_y - last_y)
+            d_end = np.hypot(end_x - last_x, end_y - last_y)
+            if d_end < d_start:
+                part = list(reversed(part))
             polyline_parts.extend(part)
 
         if len(polyline_parts) < 2:
             continue
 
-        # Order the polyline points by proximity (simple approach:
-        # sort by x then y, or use convex hull for complex cases)
-        # For MVP: sort by x then y to get a reasonable ordering
-        polyline_sorted = sorted(polyline_parts, key=lambda p: (p[0], p[1]))
-
-        # Compute length
-        length_m = compute_length_meters(polyline_sorted, scale)
-
-        # Use the first member's path ID as the source representative
-        source_path_id = member_ids[0] if member_ids else ""
+        # No coordinate sorting here: a lexicographic (x, y) sort destroys
+        # multi-segment continuity and yields zig-zag, non-path lengths.
+        # The chained items-order sequence above IS the drawing order.
+        length_m = compute_length_meters(polyline_parts, scale)
 
         route: RouteGeo = {
             "id": str(uuid.uuid4()),
             "type": layer.lower().replace(" ", "_"),
             "layer": layer,
-            "polyline": polyline_sorted,
+            "polyline": polyline_parts,
             "length_m": length_m,
             "confidence_status": "MEASURED",
             "confidence_score": 1.0,

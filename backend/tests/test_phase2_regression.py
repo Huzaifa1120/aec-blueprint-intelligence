@@ -13,26 +13,21 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-
-client = TestClient(app)
-
-
-# DB setup for in-memory SQLite — exact pattern from Phase 1 tests
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.main import app
 from app.db.base import Base
-from app.db.models.catalog import Price as PriceModel, LaborRate
 from app.catalog.prices import (
     ingest_material_price,
     ingest_labor_rate,
     compute_boq_item,
-    material_cost,
     labor_hours,
     labor_cost,
     total_cost,
 )
+
+client = TestClient(app)
 
 
 @pytest.fixture(scope="function")
@@ -150,13 +145,16 @@ def test_route_lengths_correct_at_detected_scale():
     # Test compute_length_meters pure function with known scale
     from app.parsing.routes import compute_length_meters
 
-    # At scale 1:100, 10 PDF units → 10 * 100 = 1000 real units
+    # corrected 2026-08-22: pt→paper-mm→real-m conversion (was treating pt as
+    # meters; physically impossible outputs, see tray-route-investigation.md)
+    # Net factor = denominator × 25.4 / (72 × 1000):
+    # At 1:100, 10 pt → 3.528 paper-mm × 100 = 352.78 real-mm = 0.353 m
     length = compute_length_meters([(0, 0), (10, 0)], "1:100")
-    assert length == 1000.0, f"Expected 1000.0 at 1:100, got {length}"
+    assert abs(length - 0.353) < 5e-4, f"Expected 0.353 at 1:100, got {length}"
 
-    # At scale 1:50, 10 PDF units → 10 * 50 = 500 real units
+    # At scale 1:50, 10 PDF units → 3.528 paper-mm × 50 = 176.39 real-mm = 0.176 m
     length = compute_length_meters([(0, 0), (10, 0)], "1:50")
-    assert length == 500.0, f"Expected 500.0 at 1:50, got {length}"
+    assert abs(length - 0.176) < 5e-4, f"Expected 0.176 at 1:50, got {length}"
 
     # Single point → 0 length
     length = compute_length_meters([(5, 5)], "1:100")

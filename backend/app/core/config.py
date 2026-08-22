@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:3000"]
     log_level: str = "INFO"
 
+    degraded_min_ocgs: int = 3
+    degraded_max_untagged_fraction: float = 0.9
+    degraded_confidence_multiplier: float = 0.8
+    review_time_target_min: float = 10.0
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def split_cors(cls, v: object) -> object:
