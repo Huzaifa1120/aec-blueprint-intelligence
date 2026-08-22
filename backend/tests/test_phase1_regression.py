@@ -91,7 +91,7 @@ def test_vector_parsing_engine_extracts_components() -> None:
 
     assert result["scale"] is not None, "Scale should be detected from title block"
     assert result["drawing_count"] > 10000, "Should extract all drawings"
-    assert result["clusters"] is not None, "Should produce clusters from DBSCAN"
+    assert result["clusters"] is not None, "Should produce clusters from union-find clustering"
     assert len(result["clusters"]) > 0, "Should have at least one cluster"
 
     # Verify clusters have expected structure
