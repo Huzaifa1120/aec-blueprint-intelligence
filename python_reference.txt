@@ -1,0 +1,7 @@
+python location: C:\Users\Huzaifa\AppData\Local\Programs\Python\Python313
+python version: 3.13.15
+backend dir: G:\AEC-software\backend
+venv: G:\AEC-software\backend\.venv
+run backend: cd backend && python -m uvicorn app.main:app --reload --port 8000
+run tests: cd backend && python -m pytest -q
+run lint: cd backend && python -m ruff check app tests
