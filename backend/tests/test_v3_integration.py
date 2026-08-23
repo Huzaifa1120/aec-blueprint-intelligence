@@ -23,9 +23,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session as OrmSession
 
-from app.db.models.estimate import Measurement
+from app.db.models.estimate import BoqItem, Estimate, Measurement
 from app.db.models.extraction import Layer
 from app.db.models.geometry import Component
+from app.db.models.project import Drawing, Project, Sheet
 from app.db.session import get_engine
 from tests.fixtures.make_hvac_fixture import build_hvac_fixture
 
@@ -142,6 +143,45 @@ class TestHvacFixturePipeline:
         assert disciplines.get("M-DUCT") == "mechanical"
         assert disciplines.get("M-EQPT-NEW") == "mechanical"
 
+    def test_persisted_boq_matches_response_quantities(self, client, hvac_run):
+        """Persisted BOQ must total the same as the response math (F1).
+
+        The extraction persisted to the DB is built after the BOQ loop so
+        cascade-resolved route sizes drive BOTH sides; a size divergence
+        (e.g. YAML defaults substituted for label-resolved 600x400) breaks
+        this per-material equality. Line granularity may legitimately differ
+        (response = one line per counted instance; persistence = one
+        Measurement per component type), so totals are compared, not multisets.
+        """
+        body = hvac_run
+
+        def _totals(lines):
+            totals: dict[str, float] = {}
+            for line in lines:
+                name = line["material_name"]
+                totals[name] = totals.get(name, 0.0) + float(line["quantity"])
+            return {name: round(value, 3) for name, value in totals.items()}
+
+        response_totals = _totals(body["boq_items"])
+        boq = client.get(f"/api/estimates/{body['estimate_id']}/boq").json()
+        persisted_totals = _totals(boq["routes"] + boq["materials"])
+        assert response_totals == persisted_totals
+
+    def test_persisted_route_size_provenance_non_assumed(self, client, hvac_run):
+        """Cascade-resolved sizes persist WITH provenance, not as nulls (F1).
+
+        The HVAC fixture labels/schedules its runs, so persisted Route rows
+        must carry non-null size_json and at least one must resolve above
+        the ASSUMED tier (schedule or label source).
+        """
+        boq = client.get(f"/api/estimates/{hvac_run['estimate_id']}/boq").json()
+        sized = [route for route in boq["routes"] if route.get("size_json")]
+        assert sized, "no persisted route carries size_json provenance"
+        sources = {route["size_json"].get("source") for route in sized}
+        assert sources - {"assumed"}, (
+            f"every persisted size fell back to ASSUMED: {sorted(sources)}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Real app serves estimates / exports / narration (router registration)
@@ -211,3 +251,74 @@ class TestUnmappedTiering:
                     .count()
                 )
                 assert measurement_count == 0
+
+
+# ---------------------------------------------------------------------------
+# F2: the UNMAPPED never-priced guard must not depend on rule absence
+# ---------------------------------------------------------------------------
+def test_unmapped_pricing_guard_holds_even_with_rule(monkeypatch):
+    """_persist_component_boq must hard-refuse UNMAPPED rows (F2).
+
+    Rows arrive with component_type coerced to the string "UNMAPPED", so a
+    truthiness guard never fires. Even if an ``UNMAPPED`` assembly rule
+    existed (or a rule lookup/apply misbehaves), no Measurement or BoqItem
+    may be created for an UNMAPPED component.
+    """
+    import app.e2e.persistence as persistence_module
+
+    monkeypatch.setattr(
+        persistence_module,
+        "load_assembly_rule",
+        lambda name: {
+            "name": name,
+            "bom": {"ghost_material": 1.0},
+            "waste_factor": 0.0,
+        },
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "apply_assembly",
+        lambda name, variables=None, rule_name="": {
+            "materials": [{"material_name": "ghost_material", "quantity": 2.0}]
+        },
+    )
+
+    with OrmSession(get_engine()) as db:
+        project = db.query(Project).filter_by(name="Default Project").first()
+        if project is None:
+            project = Project(name="Default Project")
+            db.add(project)
+            db.flush()
+        drawing = Drawing(discipline=None)
+        project.drawings.append(drawing)
+        db.flush()
+        sheet = Sheet(drawing_id=drawing.id, name="unmapped-guard-sheet")
+        db.add(sheet)
+        db.flush()
+        component = Component(
+            sheet_id=sheet.id,
+            component_type="UNMAPPED",
+            source_layer="X-UNKNOWN-SYM",
+            x=1.0,
+            y=2.0,
+            confidence_status="UNMAPPED",
+        )
+        db.add(component)
+        estimate = Estimate(project_id=project.id)
+        db.add(estimate)
+        db.flush()
+
+        measurements_before = db.query(Measurement).count()
+        boq_before = db.query(BoqItem).count()
+        persistence_module._persist_component_boq(
+            db,
+            estimate,
+            component,
+            count=3,
+            confidence_status="UNMAPPED",
+            source_quality="layered_vector",
+            rule_version="v3c-1",
+        )
+        assert db.query(Measurement).count() == measurements_before
+        assert db.query(BoqItem).count() == boq_before
+        db.rollback()  # keep the shared dev DB clean

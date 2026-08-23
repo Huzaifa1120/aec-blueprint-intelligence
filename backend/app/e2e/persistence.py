@@ -250,9 +250,11 @@ def _persist_component_boq(
 ) -> None:
     """Derive and persist the material lines for one counted symbol type."""
     resolved_type = component_row.component_type
-    if not resolved_type:
+    if resolved_type is None or resolved_type == "UNMAPPED":
         # UNMAPPED symbols are surfaced and persisted, never priced (D9):
-        # no rule applies, so no Measurement/BoqItem may reference them.
+        # rows arrive with component_type coerced to the string "UNMAPPED",
+        # so the guard must match that literal too — rule availability must
+        # never decide whether an unmapped symbol gets priced (F2).
         return
     if resolved_type in SIZED_ASSEMBLIES:
         # Sized assemblies are quantified by routes only (same rule as the

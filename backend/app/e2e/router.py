@@ -355,23 +355,6 @@ def e2e_run(
         # annotation component_index values refer into this combined list.
         extraction_components = components + unmapped_components
 
-        # Full SheetExtraction bundle — built on every run (cheap, pure);
-        # persisted only when asked.
-        filename = file.filename or ""
-        sheet_name = os.path.splitext(filename)[0] or None
-        extraction = _build_sheet_extraction(
-            sheet_name=sheet_name,
-            scale=scale,
-            source_quality=source_quality,
-            routes=routes,
-            route_sizes=route_sizes,
-            components=extraction_components,
-            ocg_registry=parsed.get("ocg_registry") or {},
-            cascade_spans=cascade_spans,
-            raw_text_spans=parsed.get("raw_text_spans", []),
-            pdf_path=tmp_path,
-        )
-
         # 5️⃣ Apply assembly rules & compute BOQ
         boq_items: List[Dict[str, Any]] = []
         with OrmSession(get_engine()) as db:
@@ -482,11 +465,31 @@ def e2e_run(
                         )
                     )
 
-            # Optional persistence (default-off): write the full extraction
-            # bundle through the persistence spine inside this same session.
-            estimate_id: uuid.UUID | None = None
-            if persist:
-                estimate_id = persist_extraction(db, project_id, extraction)
+        # Full SheetExtraction bundle — built AFTER the BOQ loop so
+        # route_sizes carries every cascade-resolved cross-section: the
+        # persisted rows must reflect exactly the provenance that drove the
+        # response math, never re-derived defaults (F1).
+        filename = file.filename or ""
+        sheet_name = os.path.splitext(filename)[0] or None
+        extraction = _build_sheet_extraction(
+            sheet_name=sheet_name,
+            scale=scale,
+            source_quality=source_quality,
+            routes=routes,
+            route_sizes=route_sizes,
+            components=extraction_components,
+            ocg_registry=parsed.get("ocg_registry") or {},
+            cascade_spans=cascade_spans,
+            raw_text_spans=parsed.get("raw_text_spans", []),
+            pdf_path=tmp_path,
+        )
+
+        # Optional persistence (default-off): write the full extraction
+        # bundle through the persistence spine in its own committing session.
+        estimate_id: uuid.UUID | None = None
+        if persist:
+            with OrmSession(get_engine()) as persist_db:
+                estimate_id = persist_extraction(persist_db, project_id, extraction)
 
         response: Dict[str, Any] = {
             "status": "ok",
