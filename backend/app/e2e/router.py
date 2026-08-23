@@ -379,7 +379,6 @@ def e2e_run(
                         )
                         continue
                     size_source = size.get("source")
-                    route_sizes[route_index] = size
                     # A cascade source above 'assumed' only holds if the
                     # resolved size actually covers the rule's required size
                     # variables; when defaults filled the gap the row must be
@@ -390,6 +389,10 @@ def e2e_run(
                     }
                     if any(var not in size for var in required_size_vars):
                         size_source = "assumed"
+                    # Persist the EFFECTIVE tier, not the raw cascade hit:
+                    # Route.size_json must carry the same ASSUMED downgrade
+                    # the response math used (fix-wave F2).
+                    route_sizes[route_index] = {**size, "source": size_source}
                     variables = {"length_m": route["length_m"], **{
                         k: v for k, v in size.items()
                         if k in ("width_mm", "height_mm", "diameter_mm")

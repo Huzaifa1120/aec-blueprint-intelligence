@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session as OrmSession
 
 from app.db.models.estimate import BoqItem, Estimate, Measurement
 from app.db.models.extraction import Layer
-from app.db.models.geometry import Component
+from app.db.models.geometry import Component, Route
 from app.db.models.project import Drawing, Project, Sheet
 from app.db.session import get_engine
 from tests.fixtures.make_hvac_fixture import build_hvac_fixture
@@ -251,6 +251,53 @@ class TestUnmappedTiering:
                     .count()
                 )
                 assert measurement_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Fix-wave F2: ASSUMED tier downgrade must reach persistence
+# ---------------------------------------------------------------------------
+def test_partial_dim_cascade_persists_assumed_tier(client, tmp_path, monkeypatch):
+    """Width-only cascade hit ⇒ defaults fill the gap ⇒ ASSUMED everywhere.
+
+    When resolve_route_size returns a partial dict (width_mm only), rule
+    defaults supply the missing dimension inside apply_assembly. The row
+    must carry ``source: assumed`` in the response math AND in the persisted
+    Route.size_json / BoqItem.size_source — never a silently full-confidence
+    provenance for a default-filled size.
+    """
+    import app.e2e.router as router_module
+
+    pdf_path = str(tmp_path / "hvac_fixture.pdf")
+    build_hvac_fixture(pdf_path)
+
+    def _width_only(route, text_spans, scale, schedule_rows=None, default_size=None):
+        return {"width_mm": 600.0, "source": "label", "ref": "text_span:600x400"}
+
+    monkeypatch.setattr(router_module, "resolve_route_size", _width_only)
+    response = _run_e2e(client, pdf_path)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    sized_lines = [ln for ln in body["boq_items"] if ln.get("size_source")]
+    assert sized_lines, "expected sized-route BOQ lines"
+    assert all(ln["size_source"] == "assumed" for ln in sized_lines)
+
+    boq = client.get(f"/api/estimates/{body['estimate_id']}/boq").json()
+    sized_routes = [r for r in boq["routes"] if r.get("size_json")]
+    assert sized_routes, "no persisted route carries size_json"
+    for route in sized_routes:
+        assert route["size_json"]["source"] == "assumed", route["size_json"]
+        assert route["size_source"] == "assumed"
+
+    with OrmSession(get_engine()) as db:
+        items = (
+            db.query(BoqItem)
+            .join(Measurement, BoqItem.measurement_id == Measurement.id)
+            .join(Route, Measurement.route_id == Route.id)
+            .filter(Route.sheet.has(name="hvac_fixture"))
+            .all()
+        )
+    assert items, "no persisted route-derived BoqItems found"
+    assert all(item.size_source == "assumed" for item in items)
 
 
 # ---------------------------------------------------------------------------
