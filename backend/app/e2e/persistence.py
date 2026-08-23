@@ -34,22 +34,10 @@ from app.db.models.estimate import BoqItem, Estimate, Measurement
 from app.db.models.extraction import Layer, ScheduleBlock, TextAnnotation
 from app.db.models.geometry import Component, Route
 from app.db.models.project import Drawing, Project, Sheet
-from app.e2e.extraction import SheetExtraction
+from app.e2e.extraction import ROUTE_ASSEMBLIES, SIZED_ASSEMBLIES, SheetExtraction
 from app.parsing.layer_map import layer_to_assembly
 
 logger = logging.getLogger(__name__)
-
-# Mirror of app.e2e.router's route classification sets. Duplicated (not
-# imported) because app.e2e.router imports THIS module — an import back
-# would be circular. Keep in sync; Task 9 owns the eventual consolidation.
-ROUTE_ASSEMBLIES = {
-    "cable_tray",
-    "conduit",
-    "duct_rectangular",
-    "duct_round",
-    "pipe_insulated",
-}
-SIZED_ASSEMBLIES = {"duct_rectangular", "duct_round", "pipe_insulated"}
 
 _SIZE_VARIABLES = ("width_mm", "height_mm", "diameter_mm")
 

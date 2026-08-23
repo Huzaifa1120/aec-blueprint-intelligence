@@ -8,6 +8,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Length-based assemblies: measured routes only (never point-based symbols).
+ROUTE_ASSEMBLIES = {
+    "cable_tray",
+    "conduit",
+    "duct_rectangular",
+    "duct_round",
+    "pipe_insulated",
+}
+# Mechanical route assemblies whose cross-section size drives the formulas.
+SIZED_ASSEMBLIES = {"duct_rectangular", "duct_round", "pipe_insulated"}
+
 
 @dataclass
 class LayerRow:

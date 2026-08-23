@@ -43,6 +43,8 @@ from sqlalchemy.orm import Session as OrmSession
 
 from app.db.session import get_engine
 from app.e2e.extraction import (
+    ROUTE_ASSEMBLIES,
+    SIZED_ASSEMBLIES,
     ComponentRow,
     RouteRow,
     SheetExtraction,
@@ -66,17 +68,6 @@ from app.catalog.prices import compute_boq_item
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/e2e", tags=["e2e"])
-
-# Length-based assemblies: measured routes only (never point-based symbols).
-ROUTE_ASSEMBLIES = {
-    "cable_tray",
-    "conduit",
-    "duct_rectangular",
-    "duct_round",
-    "pipe_insulated",
-}
-# Mechanical route assemblies whose cross-section size drives the formulas.
-SIZED_ASSEMBLIES = {"duct_rectangular", "duct_round", "pipe_insulated"}
 
 
 # ---------------------------------------------------------------------------
