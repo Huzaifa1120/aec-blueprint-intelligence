@@ -44,23 +44,13 @@ from app.assembly.formulas import (
 from app.assembly.rules import load_assembly_rule
 from app.db.models.estimate import BoqItem, Estimate
 from app.db.session import get_db
+from app.estimates.payload import payload_from_estimate
 
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
 
 _TOLERANCE = 1e-6
 
 _RECOGNIZED_BRANCHES = ("formula", "linear_per_m", "gauge_lookup")
-
-
-def _parse_json_object(raw: str | None) -> dict | None:
-    """Tolerant parse for read paths; None on anything unparseable."""
-    if not raw:
-        return None
-    try:
-        value = json.loads(raw)
-    except ValueError:
-        return None
-    return value if isinstance(value, dict) else None
 
 
 def _load_derivation(raw: str | None) -> tuple[dict | None, bool]:
@@ -82,60 +72,6 @@ def _load_derivation(raw: str | None) -> tuple[dict | None, bool]:
     return value, False
 
 
-def _material_name(derivation: dict, measurement: object) -> str:
-    """Best-effort label; persistence stores the name in derivation_json."""
-    for key in ("material_name", "rule_name"):
-        value = derivation.get(key)
-        if isinstance(value, str) and value:
-            return value
-    component = getattr(measurement, "component", None)
-    component_type = getattr(component, "component_type", None)
-    return component_type or getattr(measurement, "measurement_type", None) or "unnamed item"
-
-
-def _payload_from_estimate(db: OrmSession, estimate: Estimate) -> dict:
-    """Build the BOQ payload — same shape as app.exports.router adapts."""
-    routes: list[dict] = []
-    materials: list[dict] = []
-    for item in estimate.boq_items:
-        measurement = item.measurement
-        derivation = _parse_json_object(item.derivation_json) or {}
-        unpriced = bool(derivation.get("unpriced")) or item.unit_cost == 0.0
-        entry: dict = {
-            "material_name": _material_name(derivation, measurement),
-            "quantity": item.quantity,
-            "unit_cost": item.unit_cost,
-            "unit_price": None if unpriced else item.unit_cost,
-            "total_cost": item.total_cost,
-            "unpriced": unpriced,
-            "confidence_status": getattr(measurement, "confidence_status", "MEASURED"),
-            "size_source": item.size_source,
-        }
-        route = getattr(measurement, "route", None)
-        if route is not None:
-            routes.append(
-                {
-                    "route_type": route.route_type,
-                    "length_m": route.length_m,
-                    "size_json": _parse_json_object(route.size_json),
-                    "confidence_status": route.confidence_status,
-                    **entry,
-                }
-            )
-        else:
-            materials.append(entry)
-    return {
-        "estimate_id": str(estimate.id),
-        "totals": {
-            "materials": estimate.total_material_cost,
-            "labor": estimate.total_labor_cost,
-            "grand": estimate.total_cost,
-        },
-        "routes": routes,
-        "materials": materials,
-    }
-
-
 @router.get("/{estimate_id}/boq", summary="Persisted BOQ rows for an estimate")
 def get_estimate_boq(
     estimate_id: uuid.UUID,
@@ -144,7 +80,7 @@ def get_estimate_boq(
     estimate = db.get(Estimate, estimate_id)
     if estimate is None:
         raise HTTPException(status_code=404, detail="estimate not found")
-    return _payload_from_estimate(db, estimate)
+    return payload_from_estimate(estimate)
 
 
 # ---------------------------------------------------------------------------

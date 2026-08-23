@@ -20,12 +20,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-import app.narration.router as narration_router_module
 from app.db.base import Base
 from app.db.models.estimate import BoqItem, Estimate, Measurement
 from app.db.models.geometry import Component, Route
 from app.db.models.project import Drawing, Project, Sheet
+import app.narration.router as narration_router_module
 from app.db.session import get_db
+from app.estimates.payload import payload_from_estimate
 from app.narration.providers import (
     AnthropicNarrator,
     NarrationResult,
@@ -241,9 +242,7 @@ def test_endpoint_anthropic_invented_number_falls_back_to_template(api, monkeypa
     body = resp.json()
     assert body["provider"] == "template"
     # Narrative is exactly the template's deterministic output for the payload.
-    payload = narration_router_module._payload_from_estimate(
-        session, session.get(Estimate, estimate_id)
-    )
+    payload = payload_from_estimate(session.get(Estimate, estimate_id))
     assert body["narrative"] == TemplateNarrator().narrate(payload)["narrative"]
     assert "42.7" not in body["narrative"]
 
@@ -385,9 +384,7 @@ def test_endpoint_payload_carries_route_metadata(api):
     """Router-side payload must match the /boq contract shape."""
     client, session = api
     estimate_id = _seed_estimate(session)
-    payload = narration_router_module._payload_from_estimate(
-        session, session.get(Estimate, estimate_id)
-    )
+    payload = payload_from_estimate(session.get(Estimate, estimate_id))
     assert payload["routes"][0]["route_type"] == "duct_rectangular"
     assert payload["routes"][0]["length_m"] == 12.5
     assert payload["totals"]["grand"] == 95.0
