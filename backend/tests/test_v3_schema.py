@@ -39,3 +39,11 @@ def test_schedule_block_columns():
     sb = ScheduleBlock.__table__
     assert sb.c.block_type.type.length == 30
     assert isinstance(sb.c.entries_json.type, Text)
+
+
+def test_sheet_source_quality_column():
+    from app.db.models.project import Sheet
+
+    sheet_col = Sheet.__table__.c.source_quality
+    assert not sheet_col.nullable
+    assert sheet_col.default.arg == "layered_vector"

@@ -71,10 +71,20 @@ def upgrade() -> None:
             batch_op.create_foreign_key(
                 f"fk_{table_name}_layer_id_layers", "layers", ["layer_id"], ["id"]
             )
+    op.add_column(
+        "sheets",
+        sa.Column(
+            "source_quality",
+            sa.String(length=20),
+            nullable=False,
+            server_default=sa.text("'layered_vector'"),
+        ),
+    )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_column("sheets", "source_quality")
     for table_name in ("spaces", "routes", "components"):
         with op.batch_alter_table(table_name) as batch_op:
             batch_op.drop_column("layer_id")
