@@ -1,7 +1,11 @@
 """Text–layer association walker tests (spec v3 §7.x, Task A5c / G5 part 1)."""
 
 from app.e2e.extraction import TextAnnotationRow
-from app.parsing.text_walker import associate_text, probe_span_ocgs
+from app.parsing.text_walker import (
+    associate_text,
+    extract_span_ocgs_from_contents,
+    probe_span_ocgs,
+)
 
 
 def _span(text: str, cx: float, cy: float, w: float = 20.0, h: float = 10.0) -> dict:
@@ -143,3 +147,80 @@ def test_probe_span_ocgs_on_real_pymupdf_page():
     page.insert_text((72, 72), "plain text")
     result = probe_span_ocgs(page)
     assert isinstance(result, dict)
+
+
+class _ContentsPage:
+    """Fake page exposing get_text("dict") shape + read_contents() bytes."""
+
+    def __init__(self, info, contents):
+        self._info = info
+        self._contents = contents
+
+    def get_text(self, _kind):
+        return self._info
+
+    def read_contents(self):
+        return self._contents
+
+
+def _flat_info(span_groups: list[list[str]]) -> dict:
+    return {
+        "blocks": [
+            {
+                "type": 0,
+                "lines": [{"spans": [{"text": t} for t in group]} for group in span_groups],
+            }
+        ]
+    }
+
+
+def test_extract_span_ocgs_from_contents_maps_bdc_emc():
+    info = _flat_info([["duct"], ["pwr"], ["bare"]])
+    stream = (
+        b"q /OC /M-DUCT BDC BT /F1 12 Tf 72 720 Td (duct) Tj ET EMC\n"
+        b"q /OC /E-POWER BDC BT (pwr) Tj ET EMC\n"
+        b"BT (bare) Tj ET\n"
+        b"Q"
+    )
+    page = _ContentsPage(info, stream)
+    assert extract_span_ocgs_from_contents(page) == {
+        0: "M-DUCT",
+        1: "E-POWER",
+    }
+
+
+def test_extract_span_ocgs_innermost_group_wins():
+    info = _flat_info([["nested"], ["outer-only"]])
+    stream = b"/OC /OUTER BDC /OC /INNER BDC BT (nested) Tj EMC BT (outer-only) Tj EMC"
+    page = _ContentsPage(info, stream)
+    assert extract_span_ocgs_from_contents(page) == {
+        0: "INNER",
+        1: "OUTER",
+    }
+
+
+def test_extract_span_ocgs_count_mismatch_degrades_to_empty():
+    info = _flat_info([["a"], ["b"]])  # 2 spans
+    stream = b"BT (a) Tj (b) Tj (c) Tj ET"  # 3 text-showing ops
+    page = _ContentsPage(info, stream)
+    assert extract_span_ocgs_from_contents(page) == {}
+
+
+def test_extract_span_ocgs_unbalanced_marked_content_degrades():
+    info = _flat_info([["x"]])
+    page = _ContentsPage(info, b"/OC /A BDC BT (x) Tj ET")  # missing EMC
+    assert extract_span_ocgs_from_contents(page) == {}
+
+
+def test_extract_span_ocgs_string_literals_are_not_operators():
+    info = _flat_info([["tag"]])
+    stream = b"/OC /M-DUCT BDC BT (say EMC aloud) Tj ET EMC"
+    page = _ContentsPage(info, stream)
+    assert extract_span_ocgs_from_contents(page) == {0: "M-DUCT"}
+
+
+def test_probe_span_ocgs_falls_back_to_content_stream():
+    info = _flat_info([["duct"], ["pwr"]])
+    stream = b"q /OC /M-DUCT BDC BT (duct) Tj ET EMC q /OC /E-POWER BDC BT (pwr) Tj ET EMC"
+    page = _ContentsPage(info, stream)
+    assert probe_span_ocgs(page) == {0: "M-DUCT", 1: "E-POWER"}

@@ -8,7 +8,10 @@ quantity here — this only labels which annotation belongs to which target.
 
 ``probe_span_ocgs`` is a best-effort probe of PyMuPDF's per-span optional
 content group membership; it degrades to ``{}`` on any engine that does not
-expose the field.
+expose the field. When no span-level data is available it falls back to a
+content-stream walk (spec v3 §4.6(2)): ``extract_span_ocgs_from_contents``
+replays ``/OC /Name BDC … EMC`` marked-content nesting in lockstep with the
+flattened span order, returning ``{}`` on any structural doubt.
 """
 
 from __future__ import annotations
@@ -94,7 +97,9 @@ def probe_span_ocgs(page) -> dict[int, str]:
 
     Span indices follow sequential flattening of all text lines/spans across
     blocks (image blocks skipped). Returns {} on any failure or when the
-    installed PyMuPDF does not expose per-span OCG membership.
+    installed PyMuPDF does not expose per-span OCG membership; if the direct
+    span data yields nothing, the content-stream fallback tier runs (spec v3
+    §4.6(2)). A partial direct map is never merged with fallback output.
     """
     try:
         info = page.get_text("dict")
@@ -117,4 +122,120 @@ def probe_span_ocgs(page) -> dict[int, str]:
                 if xref is not None and xref in xref_names:
                     out[idx] = xref_names[xref]
                 idx += 1
-    return out
+    if out:
+        return out
+    return extract_span_ocgs_from_contents(page)
+
+
+_TEXT_SHOW_OPS = frozenset({"Tj", "TJ", "'", '"'})
+
+
+def _tokenize_contents(raw: bytes) -> list[str]:
+    """Whitespace tokenizer that keeps PDF string literals and hex strings
+    intact so their contents can never be mistaken for operators."""
+    try:
+        text = raw.decode("latin-1")
+    except Exception:
+        return []
+    tokens: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch.isspace():
+            i += 1
+            continue
+        if ch == "(":
+            depth, parts, j = 1, [], i + 1
+            while j < n and depth:
+                c = text[j]
+                if c == "\\" and j + 1 < n:
+                    parts.append(text[j : j + 2])
+                    j += 2
+                    continue
+                parts.append(c)
+                if c == "(":
+                    depth += 1
+                elif c == ")":
+                    depth -= 1
+                j += 1
+            tokens.append("(" + "".join(parts))
+            i = j
+            continue
+        if ch == "<":
+            end = text.find(">", i + 1)
+            j = n if end == -1 else end + 1
+            tokens.append(text[i:j])
+            i = j
+            continue
+        j = i
+        while j < n and not text[j].isspace():
+            j += 1
+        tokens.append(text[i:j])
+        i = j
+    return tokens
+
+
+def _scan_marked_content_ops(tokens: list[str]) -> list[str | None] | None:
+    """One innermost OC name (or None) per text-showing op, in stream order.
+
+    Returns None when the marked-content structure is unbalanced — a stray
+    ``EMC`` with an empty stack or an unclosed ``BDC`` at end of stream means
+    guessing would be dishonest.
+    """
+    stack: list[str] = []
+    prev2: str | None = None
+    prev1: str | None = None
+    ops: list[str | None] = []
+    in_image_data = False
+    for tok in tokens:
+        if in_image_data:
+            if tok == "EI":
+                in_image_data = False
+            continue
+        if tok == "BDC":
+            if prev2 == "/OC" and prev1 is not None and prev1.startswith("/"):
+                stack.append(prev1[1:])
+        elif tok == "EMC":
+            if not stack:
+                return None
+            stack.pop()
+        elif tok in _TEXT_SHOW_OPS:
+            ops.append(stack[-1] if stack else None)
+        elif tok == "ID":
+            in_image_data = True
+        prev2, prev1 = prev1, tok
+    if stack:
+        return None
+    return ops
+
+
+def extract_span_ocgs_from_contents(page) -> dict[int, str]:
+    """Content-stream BDC/EMC fallback (spec v3 §4.6(2)).
+
+    Tokenizes ``page.read_contents()`` and replays the marked-content stack
+    (``/OC /Name BDC`` pushes, ``EMC`` pops) in lockstep with the flattened
+    span order of ``page.get_text("dict")``: every span must correspond to
+    exactly one text-showing operation. Any count mismatch or unbalanced
+    marked content returns {} (honest degradation), never a partial guess.
+    """
+    try:
+        raw = page.read_contents()
+    except Exception:
+        return {}
+    if isinstance(raw, list):
+        raw = b"".join(raw)
+    if not raw:
+        return {}
+    try:
+        info = page.get_text("dict")
+    except Exception:
+        return {}
+    span_count = sum(
+        len(line.get("spans", []))
+        for block in info.get("blocks", [])
+        for line in block.get("lines", [])
+    )
+    ops = _scan_marked_content_ops(_tokenize_contents(raw))
+    if ops is None or len(ops) != span_count:
+        return {}
+    return {i: name for i, name in enumerate(ops) if name}
