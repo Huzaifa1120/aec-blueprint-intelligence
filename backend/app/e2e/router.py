@@ -24,12 +24,20 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+import uuid
 from typing import List, Dict, Any
 
 from fastapi import APIRouter, File, UploadFile
 from sqlalchemy.orm import Session as OrmSession
 
 from app.db.session import get_engine
+from app.e2e.extraction import (
+    ComponentRow,
+    LayerRow,
+    RouteRow,
+    SheetExtraction,
+)
+from app.e2e.persistence import persist_extraction
 from app.ingestion.router import classify_upload
 from app.ingestion.vector import parse_pdf
 from app.parsing.scale import detect_scale
@@ -55,6 +63,14 @@ ROUTE_ASSEMBLIES = {
 }
 # Mechanical route assemblies whose cross-section size drives the formulas.
 SIZED_ASSEMBLIES = {"duct_rectangular", "duct_round", "pipe_insulated"}
+# Assemblies counted from mechanical discipline symbols (metadata only,
+# used to label persisted LayerRows with a classified_discipline).
+MECHANICAL_ASSEMBLIES = {
+    "duct_rectangular",
+    "duct_round",
+    "pipe_insulated",
+    "hvac_equipment",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +128,70 @@ def _adapt_spans_for_cascade(raw_text_spans: List[Dict]) -> List[Dict]:
     return adapted
 
 
+def _discipline_for_layer(layer: str) -> str:
+    """Metadata-only discipline label for persisted LayerRows."""
+    assembly = layer_to_assembly(layer)
+    if assembly is None:
+        return "unclassified"
+    return "mechanical" if assembly in MECHANICAL_ASSEMBLIES else "electrical"
+
+
+def _build_sheet_extraction(
+    sheet_name: str | None,
+    scale: Any,
+    source_quality: str,
+    routes: List[Dict],
+    route_sizes: List[Dict | None],
+    components: List[Dict],
+) -> SheetExtraction:
+    """Project the pipeline's route/component lists into a SheetExtraction.
+
+    Minimal A1 slice: geometry rows only — persistence.py re-derives the
+    BOQ from the same deterministic YAML rules, never from these lists.
+    """
+    layer_names: List[str] = []
+    for route in routes:
+        name = route.get("layer", "")
+        if name and name not in layer_names:
+            layer_names.append(name)
+    for comp in components:
+        name = comp.get("layer", "")
+        if name and name not in layer_names:
+            layer_names.append(name)
+
+    return SheetExtraction(
+        sheet_name=sheet_name,
+        page_number=None,
+        scale=str(scale) if scale else None,
+        discipline=None,
+        source_quality=source_quality,
+        layers=[LayerRow(n, _discipline_for_layer(n)) for n in layer_names],
+        routes=[
+            RouteRow(
+                route_type=str(route.get("type") or ""),
+                layer_ocg=route.get("layer", ""),
+                length_m=float(route.get("length_m") or 0.0),
+                confidence_status=route.get("confidence_status", "MEASURED"),
+                confidence_score=float(route.get("confidence_score", 1.0)),
+                size_json=route_sizes[index],
+            )
+            for index, route in enumerate(routes)
+        ],
+        components=[
+            ComponentRow(
+                component_type=comp.get("assembly_type"),
+                layer_ocg=comp.get("layer", ""),
+                x=float(comp.get("x", 0.0)),
+                y=float(comp.get("y", 0.0)),
+                confidence_status=comp.get("confidence_status", "MEASURED"),
+                confidence_score=float(comp.get("confidence_score", 1.0)),
+                source_path_ids=list(comp.get("source_path_ids", [])),
+            )
+            for comp in components
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
@@ -122,8 +202,15 @@ def _adapt_spans_for_cascade(raw_text_spans: List[Dict]) -> List[Dict]:
 def e2e_run(
     file: UploadFile = File(...,
         description="PDF file to process (vector preferred)."),
+    persist: bool = False,
+    project_id: uuid.UUID | None = None,
 ) -> Dict[str, Any]:
-    """Run the complete PDF → BOQ pipeline and return BOQ items."""
+    """Run the complete PDF → BOQ pipeline and return BOQ items.
+
+    When ``persist`` is true the extraction is written to the database
+    (idempotently replacing any prior rows for the same sheet under the
+    project) and the response gains an ``estimate_id``.
+    """
 
     # Save the uploaded PDF to a temporary file so that the path‑based
     # helpers (classify_upload, parse_pdf) can receive a real file path.
@@ -157,6 +244,9 @@ def e2e_run(
         # 3️⃣ Measure routes (length-based assemblies: tray, conduit, ducts, pipes)
         route_layer_names = tuple(route_layers())
         routes = measure_routes(clusters, raw_drawings, scale, route_layer_names)
+        # Resolved cross-section sizes aligned with `routes` by index —
+        # reused when projecting a SheetExtraction for persistence.
+        route_sizes: List[Dict | None] = [None] * len(routes)
 
         # 4️⃣ Count discrete components (symbol-based assemblies)
         components = count_components(clusters, raw_drawings)
@@ -166,7 +256,7 @@ def e2e_run(
         with OrmSession(get_engine()) as db:
             # Route BOQ: quantity scales with measured length
             # Routes must ONLY evaluate against route-based assembly rules
-            for route in routes:
+            for route_index, route in enumerate(routes):
                 layer = route.get("layer", "")
                 resolved_assembly = layer_to_assembly(layer)
                 # Use resolved layer assembly if available, fall back to route type
@@ -194,6 +284,7 @@ def e2e_run(
                         )
                         continue
                     size_source = size.get("source")
+                    route_sizes[route_index] = size
                     # A cascade source above 'assumed' only holds if the
                     # resolved size actually covers the rule's required size
                     # variables; when defaults filled the gap the row must be
@@ -270,13 +361,33 @@ def e2e_run(
                         )
                     )
 
-        return {
+            # Optional A1 persistence slice (default-off): project the
+            # measured geometry into a SheetExtraction and write it through
+            # the persistence spine inside this same session.
+            estimate_id: uuid.UUID | None = None
+            if persist:
+                filename = file.filename or ""
+                sheet_name = os.path.splitext(filename)[0] or None
+                extraction = _build_sheet_extraction(
+                    sheet_name=sheet_name,
+                    scale=scale,
+                    source_quality=source_quality,
+                    routes=routes,
+                    route_sizes=route_sizes,
+                    components=components,
+                )
+                estimate_id = persist_extraction(db, project_id, extraction)
+
+        response: Dict[str, Any] = {
             "status": "ok",
             "scale": scale,
             "routes_measured": len(routes),
             "components_found": len(components),
             "boq_items": boq_items,
         }
+        if persist and estimate_id is not None:
+            response["estimate_id"] = str(estimate_id)
+        return response
 
     finally:
         # Clean up the temporary PDF file – runs even if we returned early.
