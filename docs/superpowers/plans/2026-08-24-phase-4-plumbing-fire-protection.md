@@ -1374,7 +1374,6 @@ def test_plumbing_fire_fixture_end_to_end(tmp_path):
     cw_rows = [i for i in boq if i["assembly"] == "water_supply"]
     assert cw_rows, "cold-water main produced no BOQ"
     assert all(i["size_source"] == "fixture_units" for i in cw_rows)
-    diam = {i["quantity"] and i for i in cw_rows}  # placeholder replaced below
     # diameter proof via derivation inputs:
     inputs = [i["derivation"]["inputs"] for i in cw_rows if i.get("derivation")]
     assert inputs and all(inp["diameter_mm"] == 32.0 for inp in inputs)
