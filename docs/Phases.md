@@ -157,6 +157,7 @@ All 10 Phase 1 regression tests now pass (10/10 green). The Phase 1 DoD is met a
 - Ducts, pipes, equipment, units.
 - Formula-based derivations for duct/pipe material by size & route length.
 - **DoD:** mechanical sheet(s) processed; derived quantities trace to formulas.
+- Design spec: `docs/superpowers/specs/2026-08-23-phase-3-mechanical-hvac-design.md`; implementation plan: `docs/superpowers/plans/2026-08-23-phase-3-mechanical-hvac-plan.md`. Fixture note: no dedicated HVAC sheet exists — S101's `M-EQPT-*` layers give a real equipment-counting proof; duct/pipe formulas prove against a generated deterministic fixture until the owner supplies a real mechanical sheet.
 
 ## Phase 4 — Plumbing & Fire Protection
 
