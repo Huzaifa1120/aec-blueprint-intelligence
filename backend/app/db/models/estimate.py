@@ -43,6 +43,10 @@ class BoqItem(Base):
     quantity: Mapped[float]
     unit_cost: Mapped[float]
     total_cost: Mapped[float]
+    derivation_json: Mapped[str | None] = mapped_column(String(2000), default=None)
+    # JSON text: {formula|gauge_lookup, inputs, rule_name, rule_version}
+    size_source: Mapped[str | None] = mapped_column(String(20), default=None)
+    # schedule|label|geometry|assumed
 
     measurement: Mapped[Measurement] = relationship(back_populates="boq_items")
     estimate: Mapped["Estimate"] = relationship(back_populates="boq_items")

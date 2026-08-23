@@ -63,6 +63,7 @@ class Sheet(Base):
     name: Mapped[str | None] = mapped_column(String(200))
     page_number: Mapped[int | None] = mapped_column()
     scale: Mapped[str | None] = mapped_column(String(20))
+    source_quality: Mapped[str] = mapped_column(String(20), default="layered_vector")
 
     drawing: Mapped[Drawing] = relationship(back_populates="sheets")
     components: Mapped[list["Component"]] = relationship(

@@ -159,6 +159,51 @@ All 10 Phase 1 regression tests now pass (10/10 green). The Phase 1 DoD is met a
 - **DoD:** mechanical sheet(s) processed; derived quantities trace to formulas.
 - Design spec: `docs/superpowers/specs/2026-08-23-phase-3-mechanical-hvac-design.md`; implementation plan: `docs/superpowers/plans/2026-08-23-phase-3-mechanical-hvac-plan.md`. Fixture note: no dedicated HVAC sheet exists — S101's `M-EQPT-*` layers give a real equipment-counting proof; duct/pipe formulas prove against a generated deterministic fixture until the owner supplies a real mechanical sheet.
 
+### 3.1 What's implemented (2026-08-23, branch `feature/phase-3-mechanical-hvac`):
+
+- **Restricted-AST formula engine** (`app/assembly/formulas.py`): YAML-declared parameterized formulas evaluated without eval/exec; whitelisted ops (`+ - * / **`), functions (`min/max/round/abs`); fail-closed `FormulaValidationError` at load; gauge/spec lookup tables by threshold.
+- **Rule extension** (`app/assembly/rules.py`): BOM entries may be linear multipliers (legacy, byte-identical behavior) or `{formula}` / `{gauge_lookup}` dicts with per-line waste factors; `variables`/`defaults` in rule files; `validate_rule_file()` excludes broken rules fail-closed.
+- **Mechanical rules** (`data/assemblies/`): `duct_rectangular`, `duct_round`, `pipe_insulated`, `hvac_equipment` + layer mapping for M-DUCT/M-DUCT-RND/M-PIPE/M-EQPT-* families.
+- **Size-resolution cascade** (`app/parsing/sizes.py`): schedule table → text label (`600x400`, `DN150`, `Ø250`, `12"`) → measured geometry → ASSUMED default from YAML; every resolution records `{source, ref}` provenance. Schedule-table detection via header keywords behind config.
+- **Provenance schema**: `routes.size_json`, `boq_items.derivation_json`, `boq_items.size_source` (+ Alembic migration; spurious autogenerate ops stripped).
+- **E2E mechanical branch** (`app/e2e/router.py`): sized assemblies quantified by formulas with bound variables; equipment counted via existing clustering; BOQ rows carry derivation + size_source.
+- **Validation**: exact-math golden tests (evaluator 17, rules 9, cascade 14, schedule 4); generated deterministic HVAC fixture (layer-rich, OCG-tagged, scale 1:100); real-sheet S101 equipment regression (277 units pipeline-derived — pending human visual verification); full suite 125 passed + 1 xfail.
+
+### Known gaps / follow-ups
+
+- No dedicated HVAC sheet yet: duct/pipe formulas proven on the generated fixture only; swap in a real owner sheet when available (trigger: first real mechanical upload).
+- S101 FUTR count (276) suspiciously high — likely cluster over-splitting on the xref layer; human eyeball owed before merge.
+- Clustering contract gap discovered: centroid-grid proposal misses bbox-touching elongated paths (candidate fix re-landable after human count re-baseline).
+- `test_migrations.py` planted instruction string removed (2026-08-23 fix wave).
+- Final whole-branch review (2026-08-23): BLOCK → fix wave landed (double-scaling of fittings, fail-closed rule gate wired into `load_assembly_rule`, shape-aware cascade + assumed stamping, evaluator hardening) → scoped re-review **ALL ADDRESSED**. Suite now **135 passed + 1 xfail**.
+- Owner sign-offs owed at merge: gauge hanger-kit semantics (qty 1.0 per route vs per meter); ASSUMED default sizes in YAML; derivation persistence is response-level today — DB columns (`derivation_json`) unwired pending human decision.
+- Deferred minors: exponent-cap bypass via nested unary/variable exponents; `validate_rule_file` AttributeError on non-dict YAML root.
+
+## Phase 3.5 — v3 Conformance & Gap Closure ✅ *(completed 2026-08-23)*
+
+Closes every code-addressable Phase 3 leftover and builds the spec-v3 components that did not exist yet (spec: `docs/superpowers/specs/2026-08-23-v3-conformance-gap-closure-design.md`; plan: `docs/superpowers/plans/2026-08-23-v3-conformance-gap-closure-plan.md`). Architecture unchanged: AI proposes, geometry calculates, rules derive, humans approve.
+
+### What's implemented (branch `feature/v3-conformance-gap-closure`)
+
+- **G1 — Persistence spine + replay proof:** unified `SheetExtraction` bundle → single-writer `persist_extraction` transaction (Project▸Drawing▸Sheet▸layers/routes/components/blocks/annotations + Measurements + BoqItems); `GET /api/estimates/{id}/boq` serves persisted rows verbatim; `GET /api/estimates/{id}/replay` recomputes every quantity from its recorded derivation (formula / linear_per_m / gauge_lookup) and hard-fails 409 on any mismatch or corrupt payload — a tampered database can never replay clean.
+- **G2 — Evaluator/loader hardening:** nested-unary exponent-cap bypass closed, variable exponents bounded, `validate_rule_file` fail-closed on non-dict YAML roots.
+- **G3 — Layer registry + LAYER table:** human-editable `data/layer_classification.yaml` (ordered first-match-wins regexes) classifies every OCG via `classify_layers`; per-sheet `layers` rows persist the classification and back nullable `layer_id` FKs on components/routes/spaces.
+- **G4 — Legend/schedule parser + SCHEDULE_BLOCK table:** pure `detect_blocks` heuristic over cascade text spans (header keywords, y-row grouping, ≥2 aligned rows); blocks persist with region + entries JSON.
+- **G5 — Text–layer association walker:** deterministic nearest-target join of text spans to component centroids / route polylines (`associate_text`, 18 pt threshold), OCG membership probed per span where PyMuPDF exposes it; annotations persist with resolved component/route FKs.
+- **G6 — UNMAPPED tiering:** symbol clusters on OCG layers that map to no assembly rule are clustered at the same fallback threshold, surfaced in `/api/e2e/run` as `unmapped_items` ({layer, count, source_path_ids sample}), persisted as Components with `confidence_status="UNMAPPED"`, and **never priced** (no Measurement references them).
+- **G7 — Exports:** `GET /api/exports/estimates/{id}/export?format=json|xlsx|pdf` renders the shared BOQ payload (JSON export byte-for-value equal to `/boq`; openpyxl + reportlab writers).
+- **G8 — Narrated scope of work:** `GET /api/narration/estimates/{id}` formats the structured payload verbatim (template narrator default; Anthropic import-gated behind a key, runtime number-verbatimism gate with template fallback on any violation).
+- **Integration:** `main.py` serves estimates/exports/narration routers; triplicated payload builders consolidated into `app/estimates/payload.py` (one source of truth for reads and downloads).
+- **Validation:** 223 passed + 1 xfail (was 135+1 before this phase), incl. a full-pipeline integration suite on generated fixtures (persist → replay → export → narration; unmapped surfacing/persistence); ruff clean; regression locks byte-identical.
+
+### Human gates outstanding (not code)
+
+1. S101 FUTR=276 equipment-count visual verification.
+2. Lighting count re-baseline ruling (unblocks the clustering bbox-touching fix, G9).
+3. Hanger-kit semantics confirmation (qty 1.0/route stands meanwhile).
+4. ASSUMED default duct/pipe sizes in `data/assemblies/*.yaml` confirmation.
+5. Real HVAC sheet supply (fixture swap trigger).
+
 ## Phase 4 — Plumbing & Fire Protection
 
 - Same patterns; fire-alarm layer handling (exists on the sample sheet: `FIRE ALARM`).

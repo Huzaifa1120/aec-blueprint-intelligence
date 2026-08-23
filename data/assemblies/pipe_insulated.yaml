@@ -1,0 +1,18 @@
+name: pipe_insulated
+rule_version: "1.0.0"
+variables: [length_m, diameter_mm]
+defaults:
+  diameter_mm: 150
+bom:
+  pipe_m:
+    formula: "length_m"
+    waste_factor: 0.05
+  insulation_m2:
+    formula: "3.141592653589793 * ((diameter_mm + 50) / 1000) * length_m"
+    waste_factor: 0.10
+  pipe_fitting: 0.1
+labor:
+  installation_hours: 1.8
+  hourly_rate: 48.00
+  category: mechanical
+waste_factor: 0.10

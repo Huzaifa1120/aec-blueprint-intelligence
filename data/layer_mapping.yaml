@@ -47,3 +47,28 @@ layer_mapping:
     layers:
       - CONDUIT
       - CONDUIT_RUN
+  - assembly: duct_rectangular
+    layers:
+      - M-DUCT
+      - M-DUCT-RECT
+      - DUCT
+      - SUPPLY DUCT
+      - RETURN DUCT
+  - assembly: duct_round
+    layers:
+      - M-DUCT-RND
+      - ROUND DUCT
+  - assembly: pipe_insulated
+    layers:
+      - M-PIPE
+      - PIPE
+      - CHW PIPE
+      - HW PIPE
+  - assembly: hvac_equipment
+    layers:
+      - M-EQPT
+      - M-EQPT-NEW
+      - M-EQPT-FUTR
+      - AHU
+      - FCU
+      - VAV

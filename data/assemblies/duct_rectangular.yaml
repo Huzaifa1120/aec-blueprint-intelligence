@@ -1,0 +1,23 @@
+name: duct_rectangular
+rule_version: "1.0.0"
+variables: [length_m, width_mm, height_mm, max_mm]
+defaults:            # ASSUMED fallback sizes (owner to confirm — spec §10)
+  width_mm: 400
+  height_mm: 250
+  max_mm: 400
+bom:
+  sheet_metal_m2:
+    formula: "2 * (width_mm + height_mm) / 1000 * length_m"
+    waste_factor: 0.15
+  duct_fitting: 0.2
+  hanger_kit:
+    gauge_lookup:
+      by: max_mm
+      rows:
+        600: hanger_kit_light
+        999999: hanger_kit_heavy
+labor:
+  installation_hours: 2.0
+  hourly_rate: 50.00
+  category: mechanical
+waste_factor: 0.10

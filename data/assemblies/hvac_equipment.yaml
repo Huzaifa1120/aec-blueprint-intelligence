@@ -1,0 +1,10 @@
+name: hvac_equipment
+rule_version: "1.0.0"
+bom:
+  unit_connector: 1.0
+  vibration_isolator: 4.0
+labor:
+  installation_hours: 6.0
+  hourly_rate: 55.00
+  category: mechanical
+waste_factor: 0.05
