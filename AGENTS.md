@@ -26,7 +26,7 @@ AI proposes. Geometry calculates. Rules derive. Humans approve.
 
 - `backend/` — FastAPI (Python ≥3.11). Entrypoint `app/main.py`; live routes: `/`, `/health`, `POST /api/e2e/run`, `POST /api/catalog/import`, `GET /api/catalog/`.
 - `frontend/` — Next.js 16 App Router, React 19, Tailwind v4, TS strict. `@/*` path alias → `./src/*`.
-- `data/samples/` — regression fixture `MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf` is a gitignored client drawing: obtain a copy from the project owner (absent locally as of 2026-08-22).
+- `data/samples/` — 5 gitignored client PDFs, all present locally (see `data/samples/README.md`). Primary regression fixture: `MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf`. Also: 2 structural sheets (`ABC-SC03-S101.pdf` has direct mechanical layers `M-EQPT-NEW`/`M-EQPT-FUTR` + xref `M-EQUIP`/`M-Clearances` — Phase 3 candidate), an out-of-domain addendum doc, and a text-less highway lighting plan. No dedicated HVAC/duct sheet exists yet.
 - `data/assemblies/` — YAML assembly rules (8 files); `data/layer_mapping.yaml` maps OCG layer names → rules.
 - `docs/` — design docs (PRD, architecture decisions, rules, phases, design, spec v3). See `docs/architecture_decision.md` for the key architecture convergence decision.
 
@@ -58,7 +58,7 @@ Frontend calls the backend at `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8
 
 - **Pre-commit quality gate:** `.githooks/pre-commit` runs ruff (staged `.py`) and eslint+tsc+prettier (staged frontend code). It is NOT active on fresh clones — enable once with `git config core.hooksPath .githooks`.
 - Single git repo at the root (initialized 2026-08-19); `frontend/.git` was removed so backend + frontend + docs share one history.
-- Sample PDF absent locally → 13 regression tests fail by design until restored (`data/samples/MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf`, obtain from project owner).
+- All 5 sample PDFs are present locally; the suite runs green (63 tests). On a fresh clone `data/samples/*.pdf` is gitignored — obtain copies from the project owner. No dedicated HVAC/duct sheet exists yet (Phase 3 gap).
 - Heavy ML deps (`ultralytics`, `detectron2`, `paddleocr`) are intentionally import-gated optionals — don't add them to `pyproject.toml`; they get installed ad hoc only when the Phase 2.5 raster spike needs them.
 - `frontend/AGENTS.md` is auto-written by `next dev` and warns that this Next.js major version has breaking changes. Keep that file in diffs and read `node_modules/next/dist/docs/` before writing Next.js code.
 - Use `python -m <tool>` instead of `<tool>.exe` — console-script exes can embed stale absolute paths after a venv move.
