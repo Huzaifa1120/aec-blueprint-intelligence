@@ -7,6 +7,9 @@ from app.db.session import db_ping
 from app.catalog.router import router as catalog_router
 from app.drawings.router import router as drawings_router
 from app.e2e.router import router as e2e_router
+from app.estimates.router import router as estimates_router
+from app.exports.router import router as exports_router
+from app.narration.router import router as narration_router
 from app.review.router import metrics_router as review_metrics_router
 from app.review.router import router as review_router
 
@@ -33,6 +36,13 @@ app.include_router(drawings_router)
 # Include review-time instrumentation routers (Phase 2.5, spec v3 §7.13/§15)
 app.include_router(review_router)
 app.include_router(review_metrics_router)
+
+# Include estimates read API + replay gate (v3 conformance G1)
+app.include_router(estimates_router)
+
+# Include BOQ exports (JSON/XLSX/PDF) and narrated scope of work (G7/G8)
+app.include_router(exports_router)
+app.include_router(narration_router)
 
 
 @app.get("/")

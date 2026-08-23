@@ -6,9 +6,17 @@ Exposes ``POST /api/e2e/run`` which runs the full vector pipeline:
 2. ``parse_pdf`` → extract drawings, text spans, build OCG registry
 3. ``detect_scale`` → read scale from title block
 4. ``measure_routes`` → CONDUIT / CABLE_TRAY lengths at detected scale
-5. ``count_components`` → discrete symbols (lighting, switches, trays, …)
+5. ``count_components`` → discrete symbols (lighting, switches, trays, …);
+   clusters on OCG layers that map to no assembly rule are surfaced as
+   UNMAPPED entries (never priced) per spec v3 §7.9
 6. ``apply_assembly`` → per‑component BOM & labor hours from YAML rules
 7. ``compute_boq_item`` → catalog price lookup, ``unpriced`` flag, total cost
+
+A full ``SheetExtraction`` bundle (classified layers, detected legend/schedule
+blocks, text–layer annotations, routes/components incl. UNMAPPED) is built on
+every run; when ``persist=true`` it is written through the persistence spine
+and the response carries an ``estimate_id`` replayable via
+``GET /api/estimates/{id}/replay``.
 
 Returns BOQ items with ``confidence_status`` (MEASURED/DERIVED/ASSUMED) and
 ``source_path_ids`` for frontend click‑through.
@@ -17,6 +25,8 @@ Trap compliance:
 - No price is hardcoded in source. If the catalog has no price, the item is
   flagged ``unpriced`` (never $0 substitution) for human review.
 - Layer→assembly resolution is YAML‑driven (``data/layer_mapping.yaml``).
+- Unmapped measured elements are surfaced and persisted as UNMAPPED — never
+  priced (spec v3 §7.9).
 """
 
 from __future__ import annotations
@@ -27,24 +37,28 @@ import tempfile
 import uuid
 from typing import List, Dict, Any
 
+import pymupdf  # MUST import pymupdf, never fitz
 from fastapi import APIRouter, File, UploadFile
 from sqlalchemy.orm import Session as OrmSession
 
 from app.db.session import get_engine
 from app.e2e.extraction import (
     ComponentRow,
-    LayerRow,
     RouteRow,
     SheetExtraction,
 )
 from app.e2e.persistence import persist_extraction
 from app.ingestion.router import classify_upload
-from app.ingestion.vector import parse_pdf
+from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, _scale_denominator, parse_pdf
 from app.parsing.scale import detect_scale
+from app.parsing.clustering import cluster_paths_threshold, derive_threshold_px
+from app.parsing.layer_registry import classify_layers
 from app.parsing.routes import measure_routes
+from app.parsing.schedules import detect_blocks
 from app.parsing.sizes import detect_schedule_rows, resolve_route_size
 from app.parsing.components import count_components
 from app.parsing.layer_map import layer_to_assembly, route_layers
+from app.parsing.text_walker import associate_text, probe_span_ocgs
 from app.assembly.rules import apply_assembly, load_assembly_rule
 from app.catalog.prices import compute_boq_item
 
@@ -63,14 +77,6 @@ ROUTE_ASSEMBLIES = {
 }
 # Mechanical route assemblies whose cross-section size drives the formulas.
 SIZED_ASSEMBLIES = {"duct_rectangular", "duct_round", "pipe_insulated"}
-# Assemblies counted from mechanical discipline symbols (metadata only,
-# used to label persisted LayerRows with a classified_discipline).
-MECHANICAL_ASSEMBLIES = {
-    "duct_rectangular",
-    "duct_round",
-    "pipe_insulated",
-    "hvac_equipment",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -128,14 +134,6 @@ def _adapt_spans_for_cascade(raw_text_spans: List[Dict]) -> List[Dict]:
     return adapted
 
 
-def _discipline_for_layer(layer: str) -> str:
-    """Metadata-only discipline label for persisted LayerRows."""
-    assembly = layer_to_assembly(layer)
-    if assembly is None:
-        return "unclassified"
-    return "mechanical" if assembly in MECHANICAL_ASSEMBLIES else "electrical"
-
-
 def _build_sheet_extraction(
     sheet_name: str | None,
     scale: Any,
@@ -143,21 +141,35 @@ def _build_sheet_extraction(
     routes: List[Dict],
     route_sizes: List[Dict | None],
     components: List[Dict],
+    ocg_registry: Dict[str, Dict],
+    cascade_spans: List[Dict],
+    raw_text_spans: List[Dict],
+    pdf_path: str,
 ) -> SheetExtraction:
-    """Project the pipeline's route/component lists into a SheetExtraction.
+    """Build the full SheetExtraction bundle for one sheet.
 
-    Minimal A1 slice: geometry rows only — persistence.py re-derives the
-    BOQ from the same deterministic YAML rules, never from these lists.
+    Pure projection: classified layers from the OCG registry (spec v3 §7.3),
+    legend/schedule blocks from cascade spans (§7.6), text annotations joined
+    to component centroids / route polylines (§7.5), and every counted
+    symbol — mapped assemblies AND ``component_type=None`` UNMAPPED entries.
+    Persistence re-derives the BOQ from the same deterministic YAML rules;
+    nothing here invents a quantity.
     """
-    layer_names: List[str] = []
-    for route in routes:
-        name = route.get("layer", "")
-        if name and name not in layer_names:
-            layer_names.append(name)
-    for comp in components:
-        name = comp.get("layer", "")
-        if name and name not in layer_names:
-            layer_names.append(name)
+    layers = classify_layers(ocg_registry or {})
+    schedule_blocks = detect_blocks(cascade_spans)
+    component_centroids = [
+        (float(comp.get("x", 0.0)), float(comp.get("y", 0.0))) for comp in components
+    ]
+    route_polylines = [
+        [(float(x), float(y)) for x, y in (route.get("polyline") or [])]
+        for route in routes
+    ]
+    annotations = associate_text(
+        cascade_spans,
+        component_centroids,
+        route_polylines,
+        ocg_by_span=_span_ocg_map(pdf_path, raw_text_spans),
+    )
 
     return SheetExtraction(
         sheet_name=sheet_name,
@@ -165,7 +177,7 @@ def _build_sheet_extraction(
         scale=str(scale) if scale else None,
         discipline=None,
         source_quality=source_quality,
-        layers=[LayerRow(n, _discipline_for_layer(n)) for n in layer_names],
+        layers=layers,
         routes=[
             RouteRow(
                 route_type=str(route.get("type") or ""),
@@ -183,13 +195,93 @@ def _build_sheet_extraction(
                 layer_ocg=comp.get("layer", ""),
                 x=float(comp.get("x", 0.0)),
                 y=float(comp.get("y", 0.0)),
-                confidence_status=comp.get("confidence_status", "MEASURED"),
+                confidence_status=(
+                    "UNMAPPED" if comp.get("assembly_type") is None else "MEASURED"
+                ),
                 confidence_score=float(comp.get("confidence_score", 1.0)),
                 source_path_ids=list(comp.get("source_path_ids", [])),
             )
             for comp in components
         ],
+        schedule_blocks=schedule_blocks,
+        text_annotations=annotations,
     )
+
+
+def _span_ocg_map(pdf_path: str, raw_text_spans: List[Dict]) -> dict[int, str]:
+    """Span-index → OCG name aligned with extract_text_spans' flat order.
+
+    ``probe_span_ocgs`` indexes spans per page; raw spans are flattened across
+    pages in page order, so each page's probe result is shifted by the count
+    of preceding pages' spans. Degrades to {} on any engine that does not
+    expose per-span OCG membership.
+    """
+    try:
+        doc = pymupdf.open(pdf_path)
+    except Exception:
+        return {}
+    try:
+        counts = [0] * max(doc.page_count, 0)
+        for span in raw_text_spans:
+            page_index = int(span.get("page_number", 1)) - 1
+            if 0 <= page_index < len(counts):
+                counts[page_index] += 1
+        merged: dict[int, str] = {}
+        offset = 0
+        for page_index in range(doc.page_count):
+            for span_index, name in probe_span_ocgs(doc[page_index]).items():
+                merged[offset + span_index] = name
+            offset += counts[page_index] if page_index < len(counts) else 0
+        return merged
+    except Exception:
+        return {}
+    finally:
+        doc.close()
+
+
+def _unmapped_layer_clusters(
+    ocg_registry: Dict[str, Dict],
+    raw_drawings: List[Dict],
+    scale: Any,
+) -> List[Dict]:
+    """Cluster symbol-scale paths on OCG layers that map to no assembly rule.
+
+    Uses the same fallback threshold parse_pdf clusters mapped layers with
+    (no legend-derived mm threshold exists yet), so unmapped clustering stays
+    consistent with the mapped pipeline (spec v3 §7.4/§7.9).
+    """
+    threshold_px = derive_threshold_px(None, _scale_denominator(str(scale or "")))
+    max_symbol_diagonal_px = threshold_px * SYMBOL_CUTOFF_FACTOR
+    clusters: List[Dict] = []
+    for layer_name in ocg_registry or {}:
+        if layer_to_assembly(layer_name) is not None:
+            continue
+        clusters.extend(
+            cluster_paths_threshold(
+                raw_drawings,
+                layer_name,
+                threshold_px=threshold_px,
+                max_symbol_diagonal_px=max_symbol_diagonal_px,
+            )
+        )
+    return clusters
+
+
+def _aggregate_unmapped(components: List[Dict]) -> List[Dict]:
+    """Aggregate unmapped component dicts by layer for the response payload."""
+    aggregated: Dict[str, Dict[str, Any]] = {}
+    order: List[str] = []
+    for comp in components:
+        layer = str(comp.get("layer") or "")
+        if layer not in aggregated:
+            aggregated[layer] = {
+                "layer": layer,
+                "count": 0,
+                "source_path_ids": list(comp.get("source_path_ids", [])[:3]),
+            }
+            order.append(layer)
+        aggregated[layer]["count"] += 1
+    return [aggregated[layer] for layer in order]
 
 
 # ---------------------------------------------------------------------------
@@ -248,8 +340,37 @@ def e2e_run(
         # reused when projecting a SheetExtraction for persistence.
         route_sizes: List[Dict | None] = [None] * len(routes)
 
-        # 4️⃣ Count discrete components (symbol-based assemblies)
-        components = count_components(clusters, raw_drawings)
+        # 4️⃣ Count discrete components (symbol-based assemblies). Clusters on
+        # OCG layers that map to no rule are surfaced as UNMAPPED entries —
+        # reported and persisted, never priced (spec v3 §7.9).
+        unmapped_clusters = _unmapped_layer_clusters(
+            parsed.get("ocg_registry") or {}, raw_drawings, scale
+        )
+        all_components = count_components(
+            clusters + unmapped_clusters, raw_drawings, include_unmapped=True
+        )
+        components = [c for c in all_components if c["assembly_type"] is not None]
+        unmapped_components = [c for c in all_components if c["assembly_type"] is None]
+        # Extraction order: mapped first, then UNMAPPED appended — text
+        # annotation component_index values refer into this combined list.
+        extraction_components = components + unmapped_components
+
+        # Full SheetExtraction bundle — built on every run (cheap, pure);
+        # persisted only when asked.
+        filename = file.filename or ""
+        sheet_name = os.path.splitext(filename)[0] or None
+        extraction = _build_sheet_extraction(
+            sheet_name=sheet_name,
+            scale=scale,
+            source_quality=source_quality,
+            routes=routes,
+            route_sizes=route_sizes,
+            components=extraction_components,
+            ocg_registry=parsed.get("ocg_registry") or {},
+            cascade_spans=cascade_spans,
+            raw_text_spans=parsed.get("raw_text_spans", []),
+            pdf_path=tmp_path,
+        )
 
         # 5️⃣ Apply assembly rules & compute BOQ
         boq_items: List[Dict[str, Any]] = []
@@ -361,21 +482,10 @@ def e2e_run(
                         )
                     )
 
-            # Optional A1 persistence slice (default-off): project the
-            # measured geometry into a SheetExtraction and write it through
-            # the persistence spine inside this same session.
+            # Optional persistence (default-off): write the full extraction
+            # bundle through the persistence spine inside this same session.
             estimate_id: uuid.UUID | None = None
             if persist:
-                filename = file.filename or ""
-                sheet_name = os.path.splitext(filename)[0] or None
-                extraction = _build_sheet_extraction(
-                    sheet_name=sheet_name,
-                    scale=scale,
-                    source_quality=source_quality,
-                    routes=routes,
-                    route_sizes=route_sizes,
-                    components=components,
-                )
                 estimate_id = persist_extraction(db, project_id, extraction)
 
         response: Dict[str, Any] = {
@@ -384,6 +494,10 @@ def e2e_run(
             "routes_measured": len(routes),
             "components_found": len(components),
             "boq_items": boq_items,
+            "layers_count": len(extraction.layers),
+            "schedule_blocks_count": len(extraction.schedule_blocks),
+            "text_annotations_count": len(extraction.text_annotations),
+            "unmapped_items": _aggregate_unmapped(unmapped_components),
         }
         if persist and estimate_id is not None:
             response["estimate_id"] = str(estimate_id)

@@ -250,6 +250,10 @@ def _persist_component_boq(
 ) -> None:
     """Derive and persist the material lines for one counted symbol type."""
     resolved_type = component_row.component_type
+    if not resolved_type:
+        # UNMAPPED symbols are surfaced and persisted, never priced (D9):
+        # no rule applies, so no Measurement/BoqItem may reference them.
+        return
     if resolved_type in SIZED_ASSEMBLIES:
         # Sized assemblies are quantified by routes only (same rule as the
         # e2e pipeline): a duct/pipe cluster here is geometry, not a symbol.
@@ -385,7 +389,10 @@ def persist_extraction(
             source_layer=row.layer_ocg[:100] or None,
             x=row.x,
             y=row.y,
-            confidence_status=row.confidence_status,
+            # component_type=None ⇒ UNMAPPED tier, whatever the caller sent.
+            confidence_status=(
+                row.confidence_status if row.component_type else "UNMAPPED"
+            ),
             confidence_score=row.confidence_score,
             layer_id=layer_ids.get(row.layer_ocg),
             source_quality=extraction.source_quality,

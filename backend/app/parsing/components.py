@@ -37,21 +37,27 @@ def deduplicate_components(components: List[Dict]) -> List[Dict]:
 def count_components(
     clusters: List[Dict],
     raw_drawings: List[Dict],
+    include_unmapped: bool = False,
 ) -> List[Dict]:
     """Count discrete component instances from clustered paths.
 
     Args:
-        clusters: list of ClusterResult dicts from ``cluster_paths``.
+        clusters: list of ClusterResult dicts from ``cluster_paths_threshold``.
         raw_drawings: list of DrawingPath dicts (for layer lookup by path id).
+        include_unmapped: when True, clusters whose layer maps to no assembly
+            rule are ALSO returned with ``assembly_type=None`` — surfaced for
+            the human-verified pipeline (persisted ``UNMAPPED``), never priced.
 
     Returns:
         List of component dicts:
         {
-            "assembly_type": str,
+            "assembly_type": str | None,
             "count": 1,
             "layer": str,
+            "x": float,
+            "y": float,
             "source_path_ids": [str, ...],
-            "confidence_status": "MEASURED",
+            "confidence_status": "MEASURED" | "UNMAPPED",
             "confidence_score": 1.0,
         }
     """
@@ -67,13 +73,30 @@ def count_components(
         layer = first.get("layer") or ""
         assembly = layer_to_assembly(layer)
         if assembly is None:
+            if include_unmapped:
+                centroid = cluster.get("centroid")
+                components.append(
+                    {
+                        "assembly_type": None,
+                        "count": 1,
+                        "layer": layer,
+                        "x": float(centroid[0]) if centroid is not None else 0.0,
+                        "y": float(centroid[1]) if centroid is not None else 0.0,
+                        "source_path_ids": member_ids,
+                        "confidence_status": "UNMAPPED",
+                        "confidence_score": 1.0,
+                    }
+                )
             continue
 
+        centroid = cluster.get("centroid")
         components.append(
             {
                 "assembly_type": assembly,
                 "count": 1,
                 "layer": layer,
+                "x": float(centroid[0]) if centroid is not None else 0.0,
+                "y": float(centroid[1]) if centroid is not None else 0.0,
                 "source_path_ids": member_ids,
                 "confidence_status": "MEASURED",
                 "confidence_score": 1.0,
@@ -86,8 +109,15 @@ def count_components(
 
 
 def component_totals(components: List[Dict]) -> Dict[str, int]:
-    """Aggregate component counts by assembly type (deterministic)."""
+    """Aggregate component counts by assembly type (deterministic).
+
+    Unmapped entries (``assembly_type=None``) have no rule to total under and
+    are skipped.
+    """
     totals: Dict[str, int] = {}
     for comp in components:
-        totals[comp["assembly_type"]] = totals.get(comp["assembly_type"], 0) + 1
+        assembly = comp["assembly_type"]
+        if assembly is None:
+            continue
+        totals[assembly] = totals.get(assembly, 0) + 1
     return totals
