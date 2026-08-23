@@ -84,9 +84,7 @@ def _size_matches_route_shape(size: Dict, layer: str) -> bool:
     return round_layer == round_size
 
 
-def measure_rect_width_mm(
-    route: Dict, scale: str, aspect_ratio: float = 2.0
-) -> Optional[Dict]:
+def measure_rect_width_mm(route: Dict, scale: str, aspect_ratio: float = 2.0) -> Optional[Dict]:
     """Measure duct width from the route's own double-line geometry.
 
     Width = longer bbox side converted pt -> real mm via scale; height from
@@ -160,3 +158,39 @@ def resolve_route_size(
         return out
 
     return None
+
+
+def detect_schedule_rows(
+    text_spans: List[Dict],
+    header_keywords: tuple = ("DUCT SIZE", "PIPE SCHEDULE", "DUCT SCHEDULE"),
+) -> List[Dict]:
+    """Detect schedule-table rows under a recognized header span.
+
+    Heuristic (spec §10): a span whose text contains a header keyword starts
+    a schedule; size-label spans below it within ~30 header-heights belong to
+    it. Non-parsing spans are skipped silently (debug concern only).
+    """
+    rows: List[Dict] = []
+    for header in text_spans:
+        text = (header.get("text") or "").upper()
+        if not any(kw in text for kw in header_keywords):
+            continue
+        band_height = max(header["y1"] - header["y0"], 1.0) * 30.0
+        hx0, hx1 = header["x0"] - 200.0, header["x1"] + 200.0
+        below = [
+            s
+            for s in text_spans
+            if s is not header
+            and s["y0"] > header["y1"]
+            and s["y0"] - header["y1"] <= band_height
+            and not (s["x1"] < hx0 or s["x0"] > hx1)
+        ]
+        for i, span in enumerate(sorted(below, key=lambda s: (s["y0"], s["x0"]))):
+            size = parse_size_label(span.get("text", ""))
+            if not size:
+                continue
+            row = {k: v for k, v in size.items() if k != "shape"}
+            row["ref"] = f"schedule:{header.get('text', '')}:row{i}"
+            row.update({k: span[k] for k in ("x0", "y0", "x1", "y1")})
+            rows.append(row)
+    return rows
