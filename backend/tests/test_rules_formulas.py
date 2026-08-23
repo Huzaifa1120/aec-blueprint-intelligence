@@ -97,3 +97,10 @@ class TestValidateRuleFile:
         p = tmp_path / "bad2.yaml"
         p.write_text(yaml.safe_dump(bad))
         assert len(validate_rule_file(p)) == 1
+
+    def test_validate_rule_file_list_root_is_invalid_not_crash(self, tmp_path):
+        p = tmp_path / "bad.yaml"
+        p.write_text("- just\n- a\n- list\n")
+        errors = validate_rule_file(p)
+        assert errors  # non-empty error list; no AttributeError
+        assert "mapping" in errors[0]

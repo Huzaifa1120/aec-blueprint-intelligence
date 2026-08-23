@@ -179,6 +179,31 @@ All 10 Phase 1 regression tests now pass (10/10 green). The Phase 1 DoD is met a
 - Owner sign-offs owed at merge: gauge hanger-kit semantics (qty 1.0 per route vs per meter); ASSUMED default sizes in YAML; derivation persistence is response-level today — DB columns (`derivation_json`) unwired pending human decision.
 - Deferred minors: exponent-cap bypass via nested unary/variable exponents; `validate_rule_file` AttributeError on non-dict YAML root.
 
+## Phase 3.5 — v3 Conformance & Gap Closure ✅ *(completed 2026-08-23)*
+
+Closes every code-addressable Phase 3 leftover and builds the spec-v3 components that did not exist yet (spec: `docs/superpowers/specs/2026-08-23-v3-conformance-gap-closure-design.md`; plan: `docs/superpowers/plans/2026-08-23-v3-conformance-gap-closure-plan.md`). Architecture unchanged: AI proposes, geometry calculates, rules derive, humans approve.
+
+### What's implemented (branch `feature/v3-conformance-gap-closure`)
+
+- **G1 — Persistence spine + replay proof:** unified `SheetExtraction` bundle → single-writer `persist_extraction` transaction (Project▸Drawing▸Sheet▸layers/routes/components/blocks/annotations + Measurements + BoqItems); `GET /api/estimates/{id}/boq` serves persisted rows verbatim; `GET /api/estimates/{id}/replay` recomputes every quantity from its recorded derivation (formula / linear_per_m / gauge_lookup) and hard-fails 409 on any mismatch or corrupt payload — a tampered database can never replay clean.
+- **G2 — Evaluator/loader hardening:** nested-unary exponent-cap bypass closed, variable exponents bounded, `validate_rule_file` fail-closed on non-dict YAML roots.
+- **G3 — Layer registry + LAYER table:** human-editable `data/layer_classification.yaml` (ordered first-match-wins regexes) classifies every OCG via `classify_layers`; per-sheet `layers` rows persist the classification and back nullable `layer_id` FKs on components/routes/spaces.
+- **G4 — Legend/schedule parser + SCHEDULE_BLOCK table:** pure `detect_blocks` heuristic over cascade text spans (header keywords, y-row grouping, ≥2 aligned rows); blocks persist with region + entries JSON.
+- **G5 — Text–layer association walker:** deterministic nearest-target join of text spans to component centroids / route polylines (`associate_text`, 18 pt threshold), OCG membership probed per span where PyMuPDF exposes it; annotations persist with resolved component/route FKs.
+- **G6 — UNMAPPED tiering:** symbol clusters on OCG layers that map to no assembly rule are clustered at the same fallback threshold, surfaced in `/api/e2e/run` as `unmapped_items` ({layer, count, source_path_ids sample}), persisted as Components with `confidence_status="UNMAPPED"`, and **never priced** (no Measurement references them).
+- **G7 — Exports:** `GET /api/exports/estimates/{id}/export?format=json|xlsx|pdf` renders the shared BOQ payload (JSON export byte-for-value equal to `/boq`; openpyxl + reportlab writers).
+- **G8 — Narrated scope of work:** `GET /api/narration/estimates/{id}` formats the structured payload verbatim (template narrator default; Anthropic import-gated behind a key, runtime number-verbatimism gate with template fallback on any violation).
+- **Integration:** `main.py` serves estimates/exports/narration routers; triplicated payload builders consolidated into `app/estimates/payload.py` (one source of truth for reads and downloads).
+- **Validation:** 223 passed + 1 xfail (was 135+1 before this phase), incl. a full-pipeline integration suite on generated fixtures (persist → replay → export → narration; unmapped surfacing/persistence); ruff clean; regression locks byte-identical.
+
+### Human gates outstanding (not code)
+
+1. S101 FUTR=276 equipment-count visual verification.
+2. Lighting count re-baseline ruling (unblocks the clustering bbox-touching fix, G9).
+3. Hanger-kit semantics confirmation (qty 1.0/route stands meanwhile).
+4. ASSUMED default duct/pipe sizes in `data/assemblies/*.yaml` confirmation.
+5. Real HVAC sheet supply (fixture swap trigger).
+
 ## Phase 4 — Plumbing & Fire Protection
 
 - Same patterns; fire-alarm layer handling (exists on the sample sheet: `FIRE ALARM`).
