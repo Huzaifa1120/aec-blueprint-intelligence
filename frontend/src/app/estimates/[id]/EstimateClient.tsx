@@ -32,6 +32,7 @@ import {
   BOQTable,
   classifyDiscipline,
   disciplineCounts,
+  type BOQTableHandle,
   type DisciplineTab,
 } from "@/components/estimate/BOQTable"
 import { CorrectionDialog, type CorrectionResult } from "@/components/estimate/CorrectionDialog"
@@ -61,8 +62,6 @@ const TAB_ORDER: readonly DisciplineTab[] = [
 ]
 
 const NO_SOURCE_MESSAGE = "No source region recorded for this item."
-
-const PULSE_RESET_MS = 1600
 
 const PULSE_CSS = `
 @keyframes assumed-row-pulse {
@@ -193,6 +192,7 @@ function Workspace({ estimateId, boq }: WorkspaceProps) {
   const [sessionClosed, setSessionClosed] = useState(false)
   const [closingSession, setClosingSession] = useState(false)
   const viewerRef = useRef<PDFViewerHandle | null>(null)
+  const tableRef = useRef<BOQTableHandle | null>(null)
   const session = useReviewSession(estimateId)
 
   const layout = useDefaultLayout({
@@ -320,19 +320,9 @@ function Workspace({ estimateId, boq }: WorkspaceProps) {
           (row) => row.confidence_status === "ASSUMED" && statusOf(row.key) === "pending",
         ),
       )
-      const target = stillPendingAssumed
-        ? (document.querySelector(
-            `[data-assumed-pulse="true"][data-row-key="${stillPendingAssumed.key}"]`,
-          ) ?? document.querySelector('[data-assumed-pulse="true"]'))
-        : document.querySelector('[data-assumed-pulse="true"]')
-      if (target instanceof HTMLElement) {
-        const reducedMotion =
-          typeof window !== "undefined" &&
-          window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" })
-        target.classList.add("assumed-pulse")
-        window.setTimeout(() => target.classList.remove("assumed-pulse"), PULSE_RESET_MS)
-      }
+      const target =
+        stillPendingAssumed ?? rows.find((row) => row.confidence_status === "ASSUMED") ?? null
+      if (target) tableRef.current?.scrollToRow(target.key)
     } finally {
       setAcceptingAll(false)
     }
@@ -420,6 +410,7 @@ function Workspace({ estimateId, boq }: WorkspaceProps) {
                 </div>
 
                 <BOQTable
+                  ref={tableRef}
                   rows={filteredRows}
                   reviewStatuses={reviewStatuses}
                   selectedKey={selectedKey}

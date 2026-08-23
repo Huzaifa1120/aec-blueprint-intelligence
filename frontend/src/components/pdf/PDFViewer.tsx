@@ -113,6 +113,14 @@ const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(function PDFViewer
       canvas.style.width = `${Math.floor(viewport.width)}px`
       canvas.style.height = `${Math.floor(viewport.height)}px`
 
+      const overlay = overlayRef.current
+      if (overlay) {
+        overlay.width = canvas.width
+        overlay.height = canvas.height
+        overlay.style.width = canvas.style.width
+        overlay.style.height = canvas.style.height
+      }
+
       const task = nextPage.render({
         canvas,
         viewport,

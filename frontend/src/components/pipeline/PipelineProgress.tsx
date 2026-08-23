@@ -25,7 +25,7 @@ function hasItems(data: EstimateBoq | undefined): boolean {
 }
 
 export function PipelineProgress({ estimateId }: { estimateId: string }) {
-  const [timedOut, setTimedOut] = useState(false)
+  const [deadlineHit, setDeadlineHit] = useState(false)
   const query = useQuery<EstimateBoq, Error>({
     queryKey: ["estimate", estimateId, "boq"],
     queryFn: ({ signal }) => apiGet<EstimateBoq>(`/api/estimates/${estimateId}/boq`, signal),
@@ -35,12 +35,11 @@ export function PipelineProgress({ estimateId }: { estimateId: string }) {
   })
 
   useEffect(() => {
-    if (!query.isError || timedOut) return
-    const timer = window.setTimeout(() => setTimedOut(true), PROGRESS_TIMEOUT_MS)
+    const timer = window.setTimeout(() => setDeadlineHit(true), PROGRESS_TIMEOUT_MS)
     return () => window.clearTimeout(timer)
-  }, [query.isError, timedOut])
+  }, [])
 
-  if (query.isError && timedOut) {
+  if (query.isSuccess && query.data && !hasItems(query.data)) {
     return (
       <div className="mx-auto w-full max-w-xl px-6 py-16">
         <ErrorState
@@ -50,6 +49,17 @@ export function PipelineProgress({ estimateId }: { estimateId: string }) {
               <Link href="/">Upload a different drawing</Link>
             </Button>
           }
+        />
+      </div>
+    )
+  }
+
+  if (query.isError && deadlineHit) {
+    return (
+      <div className="mx-auto w-full max-w-xl px-6 py-16">
+        <ErrorState
+          description="Can't reach the takeoff service. Check that it's running, then retry."
+          action={<Button onClick={() => void query.refetch()}>Retry</Button>}
         />
       </div>
     )

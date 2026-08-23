@@ -1,6 +1,14 @@
 "use client"
 
-import { useEffect, useMemo, useRef } from "react"
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import Link from "next/link"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { getCoreRowModel, useLegacyTable, type LegacyColumnDef } from "@tanstack/react-table/legacy"
@@ -136,6 +144,12 @@ export function groupRowsByDiscipline(rows: BoqItem[]): Entry[] {
   return entries
 }
 
+export interface BOQTableHandle {
+  scrollToRow: (key: string) => boolean
+}
+
+const PULSE_RESET_MS = 1600
+
 export interface BOQTableProps {
   rows: BoqItem[]
   reviewStatuses: Record<string, ReviewStatus>
@@ -248,21 +262,26 @@ const columns: LegacyColumnDef<BoqItem>[] = [
   },
 ]
 
-export function BOQTable({
-  rows,
-  reviewStatuses,
-  selectedKey,
-  bulkAcceptableCount,
-  assumedPendingCount,
-  onSelectRow,
-  onAccept,
-  onReset,
-  onReject,
-  onEdit,
-  onAcceptAll,
-  acceptingAll = false,
-}: BOQTableProps) {
+export const BOQTable = forwardRef<BOQTableHandle, BOQTableProps>(function BOQTable(
+  {
+    rows,
+    reviewStatuses,
+    selectedKey,
+    bulkAcceptableCount,
+    assumedPendingCount,
+    onSelectRow,
+    onAccept,
+    onReset,
+    onReject,
+    onEdit,
+    onAcceptAll,
+    acceptingAll = false,
+  },
+  ref,
+) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [pulseKey, setPulseKey] = useState<string | null>(null)
+  const pulseTimerRef = useRef<number | null>(null)
 
   const table = useLegacyTable({
     data: rows,
@@ -284,6 +303,34 @@ export function BOQTable({
   useEffect(() => {
     if (scrollRef.current) virtualizer.measure()
   }, [entries.length, virtualizer])
+
+  useEffect(() => {
+    return () => {
+      if (pulseTimerRef.current !== null) window.clearTimeout(pulseTimerRef.current)
+    }
+  }, [])
+
+  const scrollToRow = useCallback(
+    (key: string): boolean => {
+      const index = entries.findIndex((entry) => entry.kind === "row" && entry.key === key)
+      if (index < 0) return false
+      const reducedMotion =
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      virtualizer.scrollToIndex(index, {
+        align: "center",
+        behavior: reducedMotion ? "auto" : "smooth",
+      })
+      setPulseKey(key)
+      if (pulseTimerRef.current !== null) window.clearTimeout(pulseTimerRef.current)
+      pulseTimerRef.current = window.setTimeout(() => setPulseKey(null), PULSE_RESET_MS)
+      return true
+    },
+    [entries, virtualizer],
+  )
+
+  useImperativeHandle(ref, () => ({ scrollToRow }), [scrollToRow])
 
   const reviewColumnId = "review"
 
@@ -373,6 +420,7 @@ export function BOQTable({
                   className={cn(
                     "absolute inset-x-0 grid cursor-pointer items-center gap-x-3 border-b border-border/60 px-4 transition-colors duration-[var(--duration-fast)]",
                     selectedKey === entry.item.key ? "bg-accent-wash" : "hover:bg-muted/60",
+                    entry.item.key === pulseKey && "assumed-pulse",
                   )}
                   style={style}
                 >
@@ -412,4 +460,4 @@ export function BOQTable({
       )}
     </div>
   )
-}
+})

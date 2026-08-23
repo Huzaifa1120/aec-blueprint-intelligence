@@ -39,15 +39,17 @@ function readToken(name: string, fallback: number): number {
   return Number.isFinite(value) ? value : fallback
 }
 
-function readColor(name: string, fallback: string): string {
-  if (typeof window === "undefined") return fallback
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return value || fallback
+function readColor(name: string): string {
+  if (typeof window === "undefined") return ""
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 }
 
 export function clearCanvas(canvas: HTMLCanvasElement | null): void {
   if (!canvas) return
-  canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height)
+  const ctx = canvas.getContext("2d")
+  if (!ctx) return
+  ctx.resetTransform()
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
 }
 
 const SETTLED_FILL_MIN = 0.15
@@ -58,12 +60,15 @@ export function drawSourceHighlight(canvas: HTMLCanvasElement, rect: HighlightRe
   const ctx = canvas.getContext("2d")
   if (!ctx) return () => {}
 
+  const accent = readColor("--engineering-blue")
+  if (!accent) return () => {}
+
   const cssWidth = canvas.clientWidth || canvas.width
   const dpr = cssWidth > 0 ? canvas.width / cssWidth : 1
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   clearCanvas(canvas)
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  const accent = readColor("--engineering-blue", "#0072cf")
   const slow = readToken("--duration-slow", 380)
   const phase1 = Math.min(160, slow)
   const total = Math.max(slow, phase1)
@@ -122,6 +127,7 @@ export function drawSourceHighlight(canvas: HTMLCanvasElement, rect: HighlightRe
   const frame = (now: number) => {
     const elapsed = now - start
     clearCanvas(canvas)
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     if (elapsed < phase1) {
       drawCornerCrosshairs(elapsed / phase1)
     } else if (elapsed < total) {

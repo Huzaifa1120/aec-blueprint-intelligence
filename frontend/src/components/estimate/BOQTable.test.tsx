@@ -1,7 +1,10 @@
+import { act, createRef, type RefObject } from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import { BOQTable, formatMoney, formatQuantity } from "./BOQTable"
+import { BOQTable, formatMoney, formatQuantity, type BOQTableHandle } from "./BOQTable"
 import type { BoqItem } from "@/types/estimate"
+
+const scrollToIndexMock = vi.hoisted(() => vi.fn())
 
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: (options: { count: number }) => fakeVirtualizer(options.count),
@@ -18,6 +21,7 @@ function fakeVirtualizer(count: number) {
     getTotalSize: () => count * 44,
     getVirtualItems: () => items,
     measure: () => undefined,
+    scrollToIndex: scrollToIndexMock,
   }
 }
 
@@ -151,4 +155,47 @@ describe("BOQTable", () => {
     renderTable({ rows: [] })
     expect(screen.getByText("Nothing matches this filter.", { selector: "p" })).toBeInTheDocument()
   })
+
+  it("scrolls the virtualizer to a row key centered, counting group headers in the index", () => {
+    scrollToIndexMock.mockClear()
+    const ref = createRef<BOQTableHandle>()
+    renderTableWithRef(ref)
+    let accepted = false
+    act(() => {
+      accepted = ref.current?.scrollToRow("material-1") ?? false
+    })
+    expect(accepted).toBe(true)
+    expect(scrollToIndexMock).toHaveBeenCalledWith(2, { align: "center", behavior: "smooth" })
+  })
+
+  it("reports failure without scrolling for keys outside the table", () => {
+    scrollToIndexMock.mockClear()
+    const ref = createRef<BOQTableHandle>()
+    renderTableWithRef(ref)
+    let accepted = true
+    act(() => {
+      accepted = ref.current?.scrollToRow("missing-key") ?? true
+    })
+    expect(accepted).toBe(false)
+    expect(scrollToIndexMock).not.toHaveBeenCalled()
+  })
 })
+
+function renderTableWithRef(ref: RefObject<BOQTableHandle | null>) {
+  return render(
+    <BOQTable
+      ref={ref}
+      rows={mockRows}
+      reviewStatuses={{}}
+      selectedKey={null}
+      bulkAcceptableCount={2}
+      assumedPendingCount={1}
+      onSelectRow={noop}
+      onAccept={noop}
+      onReset={noop}
+      onReject={noop}
+      onEdit={noop}
+      onAcceptAll={noop}
+    />,
+  )
+}
