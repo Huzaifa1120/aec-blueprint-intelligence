@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored minified pdf.js worker — never lint vendored bundles.
+    "public/pdf.worker*.mjs",
   ]),
 ])
 
