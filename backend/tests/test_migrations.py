@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -10,16 +11,23 @@ EXPECTED = {
     "assemblies",
     "boq_items",
     "components",
+    "drawing_quality_assessments",
     "drawing_revisions",
     "drawings",
     "estimates",
+    "layers",
     "materials",
     "measurements",
     "prices",
     "projects",
+    "reexport_requests",
+    "review_actions",
+    "review_sessions",
     "routes",
+    "schedule_blocks",
     "sheets",
     "spaces",
+    "text_annotations",
 }
 
 
@@ -44,3 +52,13 @@ def test_alembic_upgrade_head_creates_all_tables(tmp_path: Path) -> None:
     assert result.returncode == 0, (
         f"Alembic failed!\nSTDOUT: {result.stdout}\nSTDERR: migration head did not apply cleanly"
     )
+
+    with sqlite3.connect(db_file) as connection:
+        rows = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    actual = {row[0] for row in rows}
+    missing = EXPECTED - actual
+    unexpected = actual - EXPECTED
+    assert not missing, f"migration head is missing tables: {sorted(missing)}"
+    assert not unexpected, f"migration head created unexpected tables: {sorted(unexpected)}"

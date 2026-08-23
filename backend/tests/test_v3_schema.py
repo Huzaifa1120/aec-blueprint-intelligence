@@ -1,6 +1,6 @@
 """v3 conformance schema — tables + FKs exist per spec §8."""
 
-from sqlalchemy import Text
+from sqlalchemy import Text, UniqueConstraint
 
 from app.db.base import Base
 from app.db.models.extraction import Layer, ScheduleBlock, TextAnnotation
@@ -20,9 +20,9 @@ def test_layer_fk_on_geometry_models():
 
 def test_layer_unique_per_sheet():
     unique_column_sets = [
-        tuple(col.name for col in getattr(uq, "columns", []))
+        tuple(col.name for col in uq.columns)
         for uq in Layer.__table__.constraints
-        if uq.__class__.__name__ == "UniqueConstraint"
+        if isinstance(uq, UniqueConstraint)
     ]
     assert ("sheet_id", "ocg_name") in unique_column_sets
 
