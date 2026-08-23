@@ -86,10 +86,21 @@ def parsed():
     return parse_pdf(str(SAMPLE))
 
 
+# Phase 4 (2026-08-24) added non-electrical mapped types to the shared layer
+# mapping (e.g. M_SAUDI_RAIN DOWNPIPE -> storm_downpipe), so raw vector totals
+# on this sheet now include types this raster spike was never certified
+# against. The spike truth-set stays scoped to the electrical types it was
+# originally certified against (the same set as APPROVED_REBASELINE_COUNTS
+# before its owner-approved 2026-08-24 extension) so the gate remains in
+# per-type mode and the converted-finding xfail evidence stays comparable.
+CERTIFIED_TRUTH_TYPES = frozenset({"access_control_door", "cable_tray", "lighting_outlet"})
+
+
 @pytest.fixture(scope="module")
 def ground_truth(parsed):
     components = count_components(parsed["clusters"], parsed["raw_drawings"])
-    return Counter(component_totals(components))
+    totals = component_totals(components)
+    return Counter({t: n for t, n in totals.items() if t in CERTIFIED_TRUTH_TYPES})
 
 
 @pytest.fixture(scope="module")
