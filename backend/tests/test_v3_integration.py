@@ -301,6 +301,74 @@ def test_partial_dim_cascade_persists_assumed_tier(client, tmp_path, monkeypatch
 
 
 # ---------------------------------------------------------------------------
+# Fix-wave F6: unsized-route apply_assembly fails closed (no 500)
+# ---------------------------------------------------------------------------
+def _build_conduit_fixture(path: str) -> None:
+    """Layer-rich mini sheet: one segmented conduit run + sheet furniture."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=1191, height=842)
+    ocg_conduit = doc.add_ocg("CONDUIT", on=True)
+
+    shape = page.new_shape()
+    p0, p1 = (200.0, 400.0), (600.0, 400.0)
+    length = p1[0] - p0[0]
+    n = max(2, int(length / 4.0) + 1)
+    pts = [(p0[0] + (p1[0] - p0[0]) * i / n, p0[1]) for i in range(n + 1)]
+    for a, b in zip(pts, pts[1:]):
+        shape.draw_line(a, b)
+        shape.finish(color=(0, 0, 1), width=1, oc=ocg_conduit)
+    # Unlayered sheet furniture keeps the quality gate happy.
+    shape.draw_rect(pymupdf.Rect(20, 20, 1171, 822))
+    shape.finish(color=(0.5, 0.5, 0.5), width=0.75)
+    shape.draw_line((35, 750), (1156, 750))
+    shape.finish(color=(0.5, 0.5, 0.5), width=0.75)
+    shape.commit()
+
+    page.insert_text((100, 100), "SCALE 1:100", fontsize=8)
+    doc.save(path)
+    doc.close()
+
+
+def test_unsized_route_rule_failure_drops_route_not_request(client, tmp_path, monkeypatch):
+    """A raising rule on the legacy path ⇒ route dropped, response still 200.
+
+    Mirrors persistence's fail-closed FormulaValidationError handling: one
+    broken assembly rule must degrade that route only — never turn the
+    whole /api/e2e/run into a 500.
+    """
+    import app.e2e.router as router_module
+    from app.assembly.formulas import FormulaValidationError
+
+    pdf_path = str(tmp_path / "conduit_fixture.pdf")
+    _build_conduit_fixture(pdf_path)
+
+    real_apply_assembly = router_module.apply_assembly
+
+    def _raising_for_unsized(component_type, variables=None, rule_name=""):
+        if variables is None and component_type in {"conduit", "cable_tray"}:
+            raise FormulaValidationError(
+                "missing variable 'length_m'", component_type
+            )
+        return real_apply_assembly(component_type, variables=variables, rule_name=rule_name)
+
+    monkeypatch.setattr(router_module, "apply_assembly", _raising_for_unsized)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post(
+            "/api/e2e/run",
+            files={"file": ("conduit_fixture.pdf", f, "application/pdf")},
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["routes_measured"] >= 1, "conduit run must be measured before the drop"
+    names = {ln["material_name"] for ln in body["boq_items"]}
+    assert not names & {"conduit_pipe", "conduit_fitting", "clamp"}, (
+        f"failed route leaked BOQ lines: {sorted(names)}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # F2: the UNMAPPED never-priced guard must not depend on rule absence
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------

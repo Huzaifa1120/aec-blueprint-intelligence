@@ -61,6 +61,7 @@ from app.parsing.sizes import detect_schedule_rows, resolve_route_size
 from app.parsing.components import count_components
 from app.parsing.layer_map import layer_to_assembly, route_layers
 from app.parsing.text_walker import associate_text, probe_span_ocgs
+from app.assembly.formulas import FormulaValidationError
 from app.assembly.rules import apply_assembly, load_assembly_rule
 from app.catalog.prices import compute_boq_item
 
@@ -400,7 +401,19 @@ def e2e_run(
                     # max_mm is derived inside rules.py from the bound
                     # width/height/diameter — no manual duplication here.
 
-                applied = apply_assembly(assembly_type, variables=variables)
+                # Fail-closed like persistence: one broken rule drops that
+                # route with a warning — it must never 500 the whole run
+                # (fix-wave F6).
+                try:
+                    applied = apply_assembly(assembly_type, variables=variables)
+                except FormulaValidationError as exc:
+                    logger.warning(
+                        "dropping %s route (%.3f m): assembly rule failed (%s)",
+                        assembly_type,
+                        route["length_m"],
+                        exc,
+                    )
+                    continue
                 for mat in applied.get("materials", []):
                     quantity = mat["quantity"]
                     # Legacy electrical path (variables=None): constants are
@@ -442,7 +455,18 @@ def e2e_run(
                     # STRICT SKIP: never apply an unrelated rule to a component
                     continue
 
-                applied = apply_assembly(resolved_type)
+                # Fail-closed like persistence: one broken rule drops that
+                # symbol type with a warning — never a 500 (fix-wave F6).
+                try:
+                    applied = apply_assembly(resolved_type)
+                except FormulaValidationError as exc:
+                    logger.warning(
+                        "dropping %s symbols (count path): assembly rule "
+                        "failed (%s)",
+                        resolved_type,
+                        exc,
+                    )
+                    continue
                 for mat in applied.get("materials", []):
                     quantity = mat["quantity"] * comp["count"]
                     boq_items.append(
