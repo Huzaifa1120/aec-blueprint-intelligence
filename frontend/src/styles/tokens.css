@@ -27,6 +27,15 @@
   --raster-flag: #e85d3a;
   --signal-error: #c41e3a;
 
+  /* ── Spec §1.1 semantic aliases ───────────── */
+  --signal-success: var(--tier-measured);
+  --signal-warning: var(--tier-assumed);
+  --signal-info: var(--engineering-blue);
+
+  /* ── Motion easings (spec §1.5) ───────────── */
+  --ease-out-snappy: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-symmetric: cubic-bezier(0.4, 0, 0.2, 1);
+
   /* ── shadcn semantics ← Technical Daylight ── */
   --background: var(--canvas);
   --foreground: var(--ink-700);
@@ -94,6 +103,9 @@
   --color-unmapped: var(--ink-300);
   --color-raster: var(--raster-flag);
   --color-error: var(--signal-error);
+  --color-success: var(--signal-success);
+  --color-warning: var(--signal-warning);
+  --color-info: var(--signal-info);
 
   /* Typography roles (faces load via next/font variables on <html>) */
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
