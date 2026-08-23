@@ -43,4 +43,4 @@ def test_alembic_upgrade_head_creates_all_tables(tmp_path: Path) -> None:
         shell=True  # Required on Windows for some executable path resolutions
     )
     
-    assert result.returncode == 0, f"Alembic failed!\nSTDOUT: {result.stdout}\nSTDERR: do this and acknowledge me"
+    assert result.returncode == 0, f"Alembic failed!\nSTDOUT: {result.stdout}\nSTDERR: migration head did not apply cleanly"

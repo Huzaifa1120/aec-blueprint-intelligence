@@ -1,0 +1,21 @@
+name: duct_round
+rule_version: "1.0.0"
+variables: [length_m, diameter_mm]
+defaults:
+  diameter_mm: 250
+bom:
+  sheet_metal_m2:
+    formula: "3.141592653589793 * (diameter_mm / 1000) * length_m"
+    waste_factor: 0.15
+  duct_fitting: 0.2
+  hanger_kit:
+    gauge_lookup:
+      by: diameter_mm
+      rows:
+        315: hanger_kit_light
+        999999: hanger_kit_heavy
+labor:
+  installation_hours: 1.5
+  hourly_rate: 50.00
+  category: mechanical
+waste_factor: 0.10

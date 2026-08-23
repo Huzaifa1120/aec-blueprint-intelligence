@@ -53,10 +53,17 @@ def all_mapped_layers() -> List[str]:
 def route_layers() -> List[str]:
     """Return mapped layer names whose assembly is a measured route.
 
-    Route assemblies (cable_tray, conduit) are measured by length rather than
-    counted per instance. The list is data-driven from the same YAML mapping.
+    Route assemblies (cable_tray, conduit, ducts, pipes) are measured by
+    length rather than counted per instance. The list is data-driven from the
+    same YAML mapping.
     """
-    route_assemblies = {"cable_tray", "conduit"}
+    route_assemblies = {
+        "cable_tray",
+        "conduit",
+        "duct_rectangular",
+        "duct_round",
+        "pipe_insulated",
+    }
     layers: List[str] = []
     for entry in load_layer_mapping():
         if entry.get("assembly") in route_assemblies:

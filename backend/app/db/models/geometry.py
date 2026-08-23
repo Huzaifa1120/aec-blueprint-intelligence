@@ -37,6 +37,8 @@ class Route(Base):
     confidence_status: Mapped[str] = mapped_column(String(20), default="MEASURED")
     confidence_score: Mapped[float] = mapped_column(default=1.0)
     source_quality: Mapped[str] = mapped_column(String(20), default="layered_vector")
+    size_json: Mapped[str | None] = mapped_column(String(1000), default=None)
+    # JSON text: {width_mm,height_mm|diameter_mm,source,ref}
 
     sheet: Mapped["Sheet"] = relationship(back_populates="routes")
     measurements: Mapped[list["Measurement"]] = relationship(

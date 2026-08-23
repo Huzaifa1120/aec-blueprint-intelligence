@@ -159,6 +159,26 @@ All 10 Phase 1 regression tests now pass (10/10 green). The Phase 1 DoD is met a
 - **DoD:** mechanical sheet(s) processed; derived quantities trace to formulas.
 - Design spec: `docs/superpowers/specs/2026-08-23-phase-3-mechanical-hvac-design.md`; implementation plan: `docs/superpowers/plans/2026-08-23-phase-3-mechanical-hvac-plan.md`. Fixture note: no dedicated HVAC sheet exists — S101's `M-EQPT-*` layers give a real equipment-counting proof; duct/pipe formulas prove against a generated deterministic fixture until the owner supplies a real mechanical sheet.
 
+### 3.1 What's implemented (2026-08-23, branch `feature/phase-3-mechanical-hvac`):
+
+- **Restricted-AST formula engine** (`app/assembly/formulas.py`): YAML-declared parameterized formulas evaluated without eval/exec; whitelisted ops (`+ - * / **`), functions (`min/max/round/abs`); fail-closed `FormulaValidationError` at load; gauge/spec lookup tables by threshold.
+- **Rule extension** (`app/assembly/rules.py`): BOM entries may be linear multipliers (legacy, byte-identical behavior) or `{formula}` / `{gauge_lookup}` dicts with per-line waste factors; `variables`/`defaults` in rule files; `validate_rule_file()` excludes broken rules fail-closed.
+- **Mechanical rules** (`data/assemblies/`): `duct_rectangular`, `duct_round`, `pipe_insulated`, `hvac_equipment` + layer mapping for M-DUCT/M-DUCT-RND/M-PIPE/M-EQPT-* families.
+- **Size-resolution cascade** (`app/parsing/sizes.py`): schedule table → text label (`600x400`, `DN150`, `Ø250`, `12"`) → measured geometry → ASSUMED default from YAML; every resolution records `{source, ref}` provenance. Schedule-table detection via header keywords behind config.
+- **Provenance schema**: `routes.size_json`, `boq_items.derivation_json`, `boq_items.size_source` (+ Alembic migration; spurious autogenerate ops stripped).
+- **E2E mechanical branch** (`app/e2e/router.py`): sized assemblies quantified by formulas with bound variables; equipment counted via existing clustering; BOQ rows carry derivation + size_source.
+- **Validation**: exact-math golden tests (evaluator 17, rules 9, cascade 14, schedule 4); generated deterministic HVAC fixture (layer-rich, OCG-tagged, scale 1:100); real-sheet S101 equipment regression (277 units pipeline-derived — pending human visual verification); full suite 125 passed + 1 xfail.
+
+### Known gaps / follow-ups
+
+- No dedicated HVAC sheet yet: duct/pipe formulas proven on the generated fixture only; swap in a real owner sheet when available (trigger: first real mechanical upload).
+- S101 FUTR count (276) suspiciously high — likely cluster over-splitting on the xref layer; human eyeball owed before merge.
+- Clustering contract gap discovered: centroid-grid proposal misses bbox-touching elongated paths (candidate fix re-landable after human count re-baseline).
+- `test_migrations.py` planted instruction string removed (2026-08-23 fix wave).
+- Final whole-branch review (2026-08-23): BLOCK → fix wave landed (double-scaling of fittings, fail-closed rule gate wired into `load_assembly_rule`, shape-aware cascade + assumed stamping, evaluator hardening) → scoped re-review **ALL ADDRESSED**. Suite now **135 passed + 1 xfail**.
+- Owner sign-offs owed at merge: gauge hanger-kit semantics (qty 1.0 per route vs per meter); ASSUMED default sizes in YAML; derivation persistence is response-level today — DB columns (`derivation_json`) unwired pending human decision.
+- Deferred minors: exponent-cap bypass via nested unary/variable exponents; `validate_rule_file` AttributeError on non-dict YAML root.
+
 ## Phase 4 — Plumbing & Fire Protection
 
 - Same patterns; fire-alarm layer handling (exists on the sample sheet: `FIRE ALARM`).
