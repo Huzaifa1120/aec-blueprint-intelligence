@@ -1,0 +1,115 @@
+/* Technical Daylight design tokens — single source of truth (spec §1).
+   Components must never hardcode hex values. */
+
+:root {
+  /* ── Ink scale ────────────────────────────── */
+  --ink-900: #0b1929;
+  --ink-700: #1a3050;
+  --ink-500: #3e618a;
+  --ink-300: #7a9fbf;
+  --ink-100: #c8d8ea;
+  --ink-50: #e8eef5;
+
+  /* ── Surfaces ─────────────────────────────── */
+  --canvas: #f2f5f9;
+  --surface: #ffffff;
+
+  /* ── Accent ───────────────────────────────── */
+  --engineering-blue: #0072cf;
+  --accent-wash: #e0f0ff;
+
+  /* ── Confidence tiers ─────────────────────── */
+  --tier-measured: #0da56a;
+  --tier-derived: #6b4ff8;
+  --tier-assumed: #d97706;
+
+  /* ── Source quality / semantic ────────────── */
+  --raster-flag: #e85d3a;
+  --signal-error: #c41e3a;
+
+  /* ── shadcn semantics ← Technical Daylight ── */
+  --background: var(--canvas);
+  --foreground: var(--ink-700);
+  --card: var(--surface);
+  --card-foreground: var(--ink-900);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink-900);
+  --primary: var(--engineering-blue);
+  --primary-foreground: #ffffff;
+  --secondary: var(--accent-wash);
+  --secondary-foreground: var(--ink-900);
+  --muted: var(--ink-50);
+  --muted-foreground: var(--ink-500);
+  --accent: var(--accent-wash);
+  --accent-foreground: var(--ink-900);
+  --destructive: var(--signal-error);
+  --border: var(--ink-100);
+  --input: var(--ink-100);
+  --ring: var(--engineering-blue);
+
+  /* ── Motion (spec §1.5) ───────────────────── */
+  --duration-fast: 120ms;
+  --duration-base: 220ms;
+  --duration-slow: 380ms;
+
+  /* ── Radius base (shadcn scale derives from this) ── */
+  --radius: 0.625rem;
+}
+
+@theme inline {
+  /* shadcn semantic utility mapping */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Extended palette */
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-ink-900: var(--ink-900);
+  --color-ink-700: var(--ink-700);
+  --color-ink-500: var(--ink-500);
+  --color-ink-300: var(--ink-300);
+  --color-ink-100: var(--ink-100);
+  --color-ink-50: var(--ink-50);
+  --color-accent-base: var(--engineering-blue);
+  --color-accent-wash: var(--accent-wash);
+  --color-measured: var(--tier-measured);
+  --color-derived: var(--tier-derived);
+  --color-assumed: var(--tier-assumed);
+  --color-unmapped: var(--ink-300);
+  --color-raster: var(--raster-flag);
+  --color-error: var(--signal-error);
+
+  /* Typography roles (faces load via next/font variables on <html>) */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "Cascadia Code", monospace;
+  --font-heading: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+
+  /* Shadows — three levels only (spec §1.4) */
+  --shadow-sm: 0 1px 3px 0 rgb(11 25 41 / 0.08);
+  --shadow-md: 0 4px 12px 0 rgb(11 25 41 / 0.12);
+  --shadow-lg: 0 16px 40px 0 rgb(11 25 41 / 0.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+}
