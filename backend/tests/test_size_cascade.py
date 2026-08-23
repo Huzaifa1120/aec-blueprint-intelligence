@@ -137,3 +137,36 @@ class TestShapeAwareness:
         route = _route([(0, 0), (17.008, 0), (17.008, 8.504), (0, 8.504), (0, 0)])
         result = resolve_route_size(route, [], "1:100")
         assert result["source"] == "geometry"
+
+
+def test_fixture_units_tier_beats_label_and_geometry_but_not_schedule():
+    from app.parsing.sizes import resolve_route_size
+
+    route = {"polyline": [(0.0, 0.0), (300.0, 0.0)], "layer": "P-DOM-CW"}
+    fu = {"diameter_mm": 32.0, "fu_total": 70.0, "ref": ["c1", "c2"]}
+    spans = [{"text": "DN50", "x0": 10.0, "y0": 10.0, "x1": 30.0, "y1": 14.0}]
+
+    out = resolve_route_size(route, spans, "1:100", fixture_unit_size=dict(fu))
+    assert out["source"] == "fixture_units"
+    assert out["diameter_mm"] == 32.0
+    assert out["fu_total"] == 70.0
+
+    # Schedule still outranks FU
+    sched = [{
+        "diameter_mm": 40.0, "ref": "sched:r1",
+        "x0": 10.0, "y0": 10.0, "x1": 30.0, "y1": 14.0,
+    }]
+    out2 = resolve_route_size(
+        route, spans, "1:100", schedule_rows=sched, fixture_unit_size=dict(fu)
+    )
+    assert out2["source"] == "schedule"
+
+    # No FU supplied -> label still works as before
+    out3 = resolve_route_size(route, spans, "1:100")
+    assert out3["source"] == "label"
+
+
+def test_size_source_order_constant_updated():
+    from app.parsing.sizes import SIZE_SOURCE_ORDER
+
+    assert SIZE_SOURCE_ORDER == ("schedule", "fixture_units", "label", "geometry", "assumed")

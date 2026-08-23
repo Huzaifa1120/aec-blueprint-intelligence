@@ -1,6 +1,7 @@
 """Size-resolution cascade for duct/pipe routes (Phase 3, spec §4).
 
-Priority: schedule table > text label > measured geometry > ASSUMED default.
+Priority: schedule table > fixture units > text label > measured geometry
+> ASSUMED default.
 Every resolution records {value..., source, ref} so downstream BOQ rows can
 state exactly where each size came from. Pure geometry/text logic — no LLM.
 """
@@ -13,7 +14,7 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-SIZE_SOURCE_ORDER = ("schedule", "label", "geometry", "assumed")
+SIZE_SOURCE_ORDER = ("schedule", "fixture_units", "label", "geometry", "assumed")
 
 # pt -> real-mm at scale denominator D: pt * D * 25.4/72
 _PT_TO_REAL_MM = 25.4 / 72.0
@@ -83,10 +84,18 @@ def _size_matches_route_shape(size: Dict, layer: str) -> bool:
     """A round size only fits a round-route layer and vice versa.
 
     Entries without an explicit ``shape`` key (schedule rows, defaults) are
-    classified by their dimension keys: ``diameter_mm`` = round.
+    classified by their dimension keys: ``diameter_mm`` = round. Round-capable
+    layers: RND/ROUND duct naming plus every pipe family (name contains
+    PIPE, or a P-/FP- plumbing / fire-protection prefix) — pipes are always
+    diameter-driven (Phase 4).
     """
     layer_upper = (layer or "").upper()
-    round_layer = "RND" in layer_upper or "ROUND" in layer_upper
+    round_layer = (
+        "RND" in layer_upper
+        or "ROUND" in layer_upper
+        or "PIPE" in layer_upper
+        or layer_upper.startswith(("P-", "FP-"))
+    )
     if "shape" in size:
         round_size = size["shape"] == "round"
     else:
@@ -128,10 +137,14 @@ def resolve_route_size(
     schedule_rows: Optional[List[Dict]] = None,
     default_size: Optional[Dict] = None,
     label_proximity_pt: float = 25.0,
+    fixture_unit_size: Optional[Dict] = None,
 ) -> Optional[Dict]:
     """Resolve a route's cross-section size via the cascade (spec §4).
 
     Returns {"width_mm","height_mm"|"diameter_mm", "source", "ref"} or None.
+    ``fixture_unit_size`` (Phase 4) carries a caller-precomputed
+    fixture-unit-based size; it outranks label/geometry/assumed but the
+    schedule table still wins.
     """
     # 1. Schedule table wins (shape-filtered: a rect row never fits a round route)
     for row in schedule_rows or []:
@@ -143,7 +156,14 @@ def resolve_route_size(
             out["ref"] = row.get("ref", "schedule_row")
             return out
 
-    # 2. Text label near the route
+    # 2. Fixture-unit accumulation (Phase 4): caller precomputed the FU
+    # resolution from counted fixtures; schedule still outranks it.
+    if fixture_unit_size is not None:
+        out = dict(fixture_unit_size)
+        out["source"] = "fixture_units"
+        return out
+
+    # 3. Text label near the route
     for span in text_spans:
         if not _label_near_route(span, route, label_proximity_pt):
             continue
@@ -160,7 +180,7 @@ def resolve_route_size(
             out["ref"] = f"text_span:{text}"
             return out
 
-    # 3. Measured geometry (double-line rectangular ducts) — never offered
+    # 4. Measured geometry (double-line rectangular ducts) — never offered
     # to round routes, whose cross-sections are diameter-driven
     measured = measure_rect_width_mm(route, scale)
     if measured and _size_matches_route_shape(measured, route.get("layer", "")):
@@ -169,7 +189,7 @@ def resolve_route_size(
         out["ref"] = "route_polyline_bbox"
         return out
 
-    # 4. ASSUMED default — flagged, never silent
+    # 5. ASSUMED default — flagged, never silent
     if default_size:
         out = dict(default_size)
         out["source"] = "assumed"
