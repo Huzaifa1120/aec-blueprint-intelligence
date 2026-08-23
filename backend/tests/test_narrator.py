@@ -276,6 +276,37 @@ def test_get_provider_defaults_to_template(monkeypatch):
     assert isinstance(get_provider(), TemplateNarrator)
 
 
+# ---------------------------------------------------------------------------
+# Fix-wave F8: missing-key honesty log (once per process)
+# ---------------------------------------------------------------------------
+def test_get_provider_logs_key_absence_once(monkeypatch, caplog):
+    import logging
+
+    import app.narration.providers as providers_module
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(providers_module, "anthropic", None)
+    monkeypatch.setattr(providers_module, "_KEY_ABSENT_LOGGED", False)
+    with caplog.at_level(logging.INFO, logger="app.narration.providers"):
+        assert isinstance(get_provider(), TemplateNarrator)
+        assert isinstance(get_provider(), TemplateNarrator)  # second call: silent
+    records = [r for r in caplog.records if "template narration pinned" in r.message]
+    assert len(records) == 1
+
+
+def test_get_provider_no_absence_log_when_key_set_but_sdk_missing(monkeypatch, caplog):
+    import logging
+
+    import app.narration.providers as providers_module
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(providers_module, "anthropic", None)
+    monkeypatch.setattr(providers_module, "_KEY_ABSENT_LOGGED", False)
+    with caplog.at_level(logging.INFO, logger="app.narration.providers"):
+        assert isinstance(get_provider(), TemplateNarrator)
+    assert not [r for r in caplog.records if "anthropic key absent" in r.message]
+
+
 def test_get_provider_template_when_key_set_but_sdk_missing(monkeypatch):
     import app.narration.providers as providers_module
 

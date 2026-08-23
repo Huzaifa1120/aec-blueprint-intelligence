@@ -196,8 +196,19 @@ class AnthropicNarrator:
         return {"narrative": narrative, "provider": self.name}
 
 
+_KEY_ABSENT_LOGGED = False
+
+
 def get_provider() -> NarratorProvider:
     """Anthropic iff env key set AND sdk importable, else template."""
+    global _KEY_ABSENT_LOGGED
     if os.environ.get("ANTHROPIC_API_KEY") and anthropic is not None:
         return AnthropicNarrator()
+    if not os.environ.get("ANTHROPIC_API_KEY") and not _KEY_ABSENT_LOGGED:
+        # Honesty log (fix-wave F8): state once per process WHY narration is
+        # template-pinned; behavior itself stays deterministic per request.
+        logger.info(
+            "anthropic key absent - template narration pinned for process"
+        )
+        _KEY_ABSENT_LOGGED = True
     return TemplateNarrator()
