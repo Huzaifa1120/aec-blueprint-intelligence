@@ -27,4 +27,9 @@ class TestProvenanceColumns:
     def test_json_round_trip(self):
         payload = {"width_mm": 600, "height_mm": 400,
                    "source": "label", "ref": "text_span:600x400"}
-        assert json.loads(json.dumps(payload)) == payload
+        instance = Route(
+            route_type="duct_rectangular",
+            length_m=10.0,
+            size_json=json.dumps(payload),
+        )
+        assert json.loads(instance.size_json) == payload
