@@ -1,0 +1,18 @@
+name: standpipe
+rule_version: "1.0.0"
+variables: [length_m, diameter_mm, elbows_90, tees]
+defaults:
+  diameter_mm: 100
+bom:
+  standpipe_m:
+    formula: "length_m"
+    waste_factor: 0.05
+  bend_90_elbow:
+    formula: "elbows_90 * 1.05"
+    waste_factor: 0.0
+  coupling: 0.5
+labor:
+  installation_hours: 1.4
+  hourly_rate: 48.00
+  category: fire_protection
+waste_factor: 0.10

@@ -1,0 +1,21 @@
+name: sanitary_drainage
+rule_version: "1.0.0"
+variables: [length_m, diameter_mm, elbows_90, tees]
+defaults:
+  diameter_mm: 100
+bom:
+  drain_pipe_m:
+    formula: "length_m"
+    waste_factor: 0.05
+  bend_90_elbow:
+    formula: "elbows_90 * 1.05"
+    waste_factor: 0.0
+  junction_tee:
+    formula: "tees"
+    waste_factor: 0.0
+  pipe_bracket: 0.7
+labor:
+  installation_hours: 1.2
+  hourly_rate: 42.00
+  category: plumbing
+waste_factor: 0.10

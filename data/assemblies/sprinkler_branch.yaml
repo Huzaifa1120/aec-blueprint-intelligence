@@ -1,0 +1,21 @@
+name: sprinkler_branch
+rule_version: "1.0.0"
+variables: [length_m, diameter_mm, elbows_90, tees]
+defaults:
+  diameter_mm: 25
+bom:
+  branch_pipe_m:
+    formula: "length_m"
+    waste_factor: 0.05
+  elbow_fitting:
+    formula: "elbows_90"
+    waste_factor: 0.0
+  tee_fitting:
+    formula: "tees"
+    waste_factor: 0.0
+  hanger_bracket: 1.2
+labor:
+  installation_hours: 1.1
+  hourly_rate: 45.00
+  category: fire_protection
+waste_factor: 0.10

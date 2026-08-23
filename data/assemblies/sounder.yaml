@@ -1,0 +1,10 @@
+name: sounder
+rule_version: "1.0.0"
+bom:
+  sounder: 1
+  back_box: 1
+labor:
+  installation_hours: 0.5
+  hourly_rate: 45.00
+  category: fire_alarm
+waste_factor: 0.02

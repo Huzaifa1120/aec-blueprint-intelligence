@@ -1,0 +1,13 @@
+name: sink
+rule_version: "1.0.0"
+bom:
+  sink: 1
+  trap: 1
+  angle_valve: 1
+  supply_line: 1
+labor:
+  installation_hours: 1.3
+  hourly_rate: 38.00
+  category: plumbing
+waste_factor: 0.05
+fixture_units: 2
