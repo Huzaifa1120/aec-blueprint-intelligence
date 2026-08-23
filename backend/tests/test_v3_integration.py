@@ -303,6 +303,73 @@ def test_partial_dim_cascade_persists_assumed_tier(client, tmp_path, monkeypatch
 # ---------------------------------------------------------------------------
 # F2: the UNMAPPED never-priced guard must not depend on rule absence
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Fix-wave L1: persistence must mirror the router's STRICT name skip
+# ---------------------------------------------------------------------------
+def test_persist_component_strict_name_skip(monkeypatch):
+    """Rule whose ``name`` differs from the assembly_type ⇒ no rows at all.
+
+    The response pipeline skips components when load_assembly_rule returns
+    None or the loaded rule's declared name does not match the resolved
+    type (never apply an unrelated rule). _persist_component_boq must
+    enforce exactly the same gate so persisted BOQ never diverges from the
+    response math.
+    """
+    import app.e2e.persistence as persistence_module
+
+    monkeypatch.setattr(
+        persistence_module,
+        "load_assembly_rule",
+        lambda name: {"name": f"unrelated_{name}", "bom": {}, "waste_factor": 0.0},
+    )
+
+    def _forbidden_apply(name, variables=None, rule_name=""):
+        raise AssertionError(
+            "apply_assembly must never run for a name-mismatched component"
+        )
+
+    monkeypatch.setattr(persistence_module, "apply_assembly", _forbidden_apply)
+
+    with OrmSession(get_engine()) as db:
+        project = db.query(Project).filter_by(name="Default Project").first()
+        if project is None:
+            project = Project(name="Default Project")
+            db.add(project)
+            db.flush()
+        drawing = Drawing(discipline=None)
+        project.drawings.append(drawing)
+        db.flush()
+        sheet = Sheet(drawing_id=drawing.id, name="strict-skip-sheet")
+        db.add(sheet)
+        db.flush()
+        component = Component(
+            sheet_id=sheet.id,
+            component_type="mystery_symbol",
+            source_layer="X-SYM",
+            x=1.0,
+            y=2.0,
+        )
+        db.add(component)
+        estimate = Estimate(project_id=project.id)
+        db.add(estimate)
+        db.flush()
+
+        measurements_before = db.query(Measurement).count()
+        boq_before = db.query(BoqItem).count()
+        persistence_module._persist_component_boq(
+            db,
+            estimate,
+            component,
+            count=5,
+            confidence_status="MEASURED",
+            source_quality="layered_vector",
+            rule_version="v3c-1",
+        )
+        assert db.query(Measurement).count() == measurements_before
+        assert db.query(BoqItem).count() == boq_before
+        db.rollback()  # keep the shared dev DB clean
+
+
 def test_unmapped_pricing_guard_holds_even_with_rule(monkeypatch):
     """_persist_component_boq must hard-refuse UNMAPPED rows (F2).
 

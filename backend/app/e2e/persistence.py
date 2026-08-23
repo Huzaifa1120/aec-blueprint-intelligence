@@ -248,6 +248,12 @@ def _persist_component_boq(
         # Sized assemblies are quantified by routes only (same rule as the
         # e2e pipeline): a duct/pipe cluster here is geometry, not a symbol.
         return
+    # STRICT SKIP, mirroring app.e2e.router: when the rule is missing or its
+    # declared name does not match the resolved type, never apply an
+    # unrelated rule — persisted BOQ must equal response math (fix-wave L1).
+    rule = load_assembly_rule(resolved_type)
+    if rule is None or resolved_type != rule.get("name", resolved_type):
+        return
     applied = apply_assembly(resolved_type)
     materials = applied.get("materials", [])
     if not materials:
