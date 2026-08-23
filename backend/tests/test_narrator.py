@@ -29,8 +29,10 @@ from app.db.session import get_db
 from app.narration.providers import (
     AnthropicNarrator,
     NarrationResult,
+    NumberVerbatimismError,
     TemplateNarrator,
     get_provider,
+    verify_no_invented_numbers,
 )
 from app.narration.router import router as narration_router
 
@@ -197,6 +199,71 @@ def test_anthropic_model_configurable_via_constructor():
     fake = _FakeClient("ok")
     AnthropicNarrator(client=fake, model="test-model").narrate(_small_payload())
     assert fake.calls[0]["model"] == "test-model"
+
+
+# ---------------------------------------------------------------------------
+# Runtime numeric verification (verbatimism gate on the LLM path)
+# ---------------------------------------------------------------------------
+def test_verify_rejects_invented_number():
+    with pytest.raises(NumberVerbatimismError, match="42.7"):
+        verify_no_invented_numbers("Total run is 42.7 m long.", _small_payload())
+
+
+def test_verify_accepts_payload_numbers_counts_and_string_embedded_digits():
+    payload = _small_payload()
+    payload["routes"][0]["size_json"] = {"width_mm": 600, "height_mm": 400, "ref": "600x400"}
+    narrative = (
+        "Summary: 1 material line item and 1 measured route; grand total 87.5. "
+        "Duct run 12.5 m at size ref 600x400; sealant quantity 3.0."
+    )
+    verify_no_invented_numbers(narrative, payload)  # must not raise
+
+
+def test_verify_rejects_computed_total_not_in_payload():
+    payload = _small_payload()
+    payload["totals"].pop("grand")
+    with pytest.raises(NumberVerbatimismError):
+        verify_no_invented_numbers("Grand total cost: 95.0.", payload)
+
+
+def test_endpoint_anthropic_invented_number_falls_back_to_template(api, monkeypatch):
+    client, session = api
+    estimate_id = _seed_estimate(session)
+    fake = _FakeClient("Scope narrative citing invented value 42.7 metres.")
+    monkeypatch.setattr(
+        narration_router_module,
+        "get_provider",
+        lambda: AnthropicNarrator(client=fake),
+    )
+
+    resp = client.get(f"/api/narration/estimates/{estimate_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["provider"] == "template"
+    # Narrative is exactly the template's deterministic output for the payload.
+    payload = narration_router_module._payload_from_estimate(
+        session, session.get(Estimate, estimate_id)
+    )
+    assert body["narrative"] == TemplateNarrator().narrate(payload)["narrative"]
+    assert "42.7" not in body["narrative"]
+
+
+def test_endpoint_anthropic_compliant_narrative_passes_through(api, monkeypatch):
+    client, session = api
+    estimate_id = _seed_estimate(session)
+    compliant = "Scope: duct run of 12.5 m and sealant quantity 3.0; grand total cost 95.0."
+    fake = _FakeClient(compliant)
+    monkeypatch.setattr(
+        narration_router_module,
+        "get_provider",
+        lambda: AnthropicNarrator(client=fake),
+    )
+
+    resp = client.get(f"/api/narration/estimates/{estimate_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["provider"] == "anthropic"
+    assert body["narrative"] == compliant
 
 
 # ---------------------------------------------------------------------------

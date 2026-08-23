@@ -20,7 +20,12 @@ from sqlalchemy.orm import Session as OrmSession
 
 from app.db.models.estimate import Estimate
 from app.db.session import get_db
-from app.narration.providers import NarrationResult, get_provider
+from app.narration.providers import (
+    NarrationResult,
+    TemplateNarrator,
+    get_provider,
+    verify_no_invented_numbers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,14 +106,19 @@ def narrate_estimate(estimate_id: uuid.UUID, db: OrmSession = Depends(get_db)) -
     payload = _payload_from_estimate(db, estimate)
 
     global _fallback_logged
+    provider = get_provider()
     try:
-        result: NarrationResult = get_provider().narrate(payload)
+        result: NarrationResult = provider.narrate(payload)
+        # Runtime numeric enforcement — prompt compliance is never trusted.
+        verify_no_invented_numbers(result["narrative"], payload)
     except Exception:
         if not _fallback_logged:
-            logger.warning("narration provider failed; falling back to template", exc_info=True)
+            logger.warning(
+                "narration provider %s failed verbatimism gate; falling back to template",
+                getattr(provider, "name", "?"),
+                exc_info=True,
+            )
             _fallback_logged = True
-        from app.narration.providers import TemplateNarrator
-
         result = TemplateNarrator().narrate(payload)
 
     return {

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import typing
 from typing import Protocol
 
@@ -48,6 +49,57 @@ _ANTHROPIC_SYSTEM_PROMPT = (
 def _fmt(value: object) -> str:
     """Format a structured number verbatim — never round or recompute."""
     return str(value)
+
+
+_NUM_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
+class NumberVerbatimismError(RuntimeError):
+    """Raised when a narrative contains a number not traceable to the payload."""
+
+
+def _allowed_number_tokens(payload: object) -> set[str]:
+    """Numeric strings traceable to the payload + structural row counts.
+
+    A narrative number is legitimate only if it (a) is a payload number,
+    (b) occurs inside a payload string (e.g. a size ref "600x400"), or
+    (c) counts rows in a payload list. Nothing else may appear.
+    """
+    allowed: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, bool):
+            return
+        if isinstance(node, (int, float)):
+            token = str(node)
+            allowed.add(token)
+            allowed.update(_NUM_RE.findall(token))  # e.g. scientific notation
+            return
+        if isinstance(node, str):
+            allowed.update(_NUM_RE.findall(node))
+            return
+        if isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, (list, tuple)):
+            allowed.add(str(len(node)))
+            for value in node:
+                walk(value)
+
+    walk(payload)
+    return allowed
+
+
+def verify_no_invented_numbers(narrative: str, boq_payload: dict) -> None:
+    """Runtime guard: raise NumberVerbatimismError on any untraceable number.
+
+    Enforcement floor for LLM-backed providers — prompt compliance is never
+    trusted; the deterministic template remains the only unconditional output.
+    """
+    allowed = _allowed_number_tokens(boq_payload)
+    for token in _NUM_RE.findall(narrative):
+        if token not in allowed:
+            raise NumberVerbatimismError(f"invented number {token}")
 
 
 class TemplateNarrator:
