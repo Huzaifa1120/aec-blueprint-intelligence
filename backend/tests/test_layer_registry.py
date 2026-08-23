@@ -40,7 +40,6 @@ def test_mechanical_families():
 def test_electrical_family_patterns():
     registry = {
         "ADO EXIT": {},
-        "FIRE ALARM": {},
         "NORMAL TRAY": {},
         "access control": {},
     }
@@ -64,3 +63,31 @@ def test_architectural_envelope_material_rendering():
 
 def test_empty_registry_returns_empty_list():
     assert classify_layers({}) == []
+
+
+def test_phase4_disciplines():
+    from app.parsing.layer_registry import classify_layers
+
+    registry = {
+        n: {"name": n, "on": True, "intent": "Draw"}
+        for n in [
+            "FIRE ALARM",
+            "M_SAUDI_RAIN DOWNPIPE",
+            "P-SAN-MAIN",
+            "P-DOM-CW",
+            "FP-SPRK-BRANCH",
+            "FA-DETECTOR",
+            "E-lt-fix-nm-clg",          # stays electrical
+            "M_SAUDI_WATER_INSULATING", # stays envelope
+        ]
+    }
+    rows = classify_layers(registry)
+    got = {r.ocg_name: r.classified_discipline for r in rows}
+    assert got["FIRE ALARM"] == "fire_alarm"
+    assert got["M_SAUDI_RAIN DOWNPIPE"] == "plumbing"
+    assert got["P-SAN-MAIN"] == "plumbing"
+    assert got["P-DOM-CW"] == "plumbing"
+    assert got["FP-SPRK-BRANCH"] == "fire_protection"
+    assert got["FA-DETECTOR"] == "fire_alarm"
+    assert got["E-lt-fix-nm-clg"] == "electrical"
+    assert got["M_SAUDI_WATER_INSULATING"] == "envelope"
