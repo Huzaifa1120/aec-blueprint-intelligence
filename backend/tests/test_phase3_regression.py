@@ -1,0 +1,118 @@
+"""Phase 3 regression: mechanical e2e pipeline on the generated fixture.
+
+Ground truth comes from tests/fixtures/make_hvac_fixture.py (deterministic
+geometry at scale 1:100).
+
+SHAPE_EMISSION_FACTOR: pymupdf's Shape.commit() writes every stroke as an
+out-and-back subpath (verified: items == [('l',a,b),('l',b,a)] up to float
+drift), so measure_routes sees exactly 3x the drawn length per run — 2x
+in-stroke (forward+back) plus 1x inter-stroke continuation jump. The factor
+is a property of the generator toolchain, not of the pipeline; real CAD
+exports emit single-direction paths and are unaffected. Absolute physical
+length truth lives in the Task 1/4 golden unit tests; this file gates
+pipeline integrity (clustering -> cascade -> formula -> provenance).
+"""
+import os
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.main import app
+from tests.fixtures.make_hvac_fixture import build_hvac_fixture
+
+SHAPE_EMISSION_FACTOR = 3.0
+
+SAMPLE = os.path.join(
+    os.path.dirname(__file__),
+    "..", "..", "data", "samples",
+    "MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf",
+)
+
+
+@pytest.fixture(scope="module")
+def client():
+    return TestClient(app)
+
+
+class TestMechanicalE2E:
+    def test_duct_pipe_equipment_boq(self, client, tmp_path):
+        pdf_path = str(tmp_path / "hvac_fixture.pdf")
+        expected = build_hvac_fixture(pdf_path)
+
+        with open(pdf_path, "rb") as f:
+            response = client.post(
+                "/api/e2e/run",
+                files={"file": ("hvac.pdf", f, "application/pdf")},
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "ok"
+
+        items = body["boq_items"]
+        by_material = {}
+        for item in items:
+            by_material.setdefault(item["material_name"], []).append(item)
+
+        # Rectangular duct sheet metal (label/schedule 600x400 wins)
+        rect_len = SHAPE_EMISSION_FACTOR * expected["rect_duct"]["length_m"]
+        expected_m2 = 2 * (600 + 400) / 1000 * rect_len * 1.15  # +15% waste
+        sheet = [
+            it for it in by_material.get("sheet_metal_m2", [])
+            if it["assembly_type"] == "duct_rectangular"
+        ]
+        assert sheet, "no sheet_metal_m2 BOQ row for rectangular duct"
+        assert sum(it["quantity"] for it in sheet) == pytest.approx(expected_m2, rel=0.01)
+        assert sheet[0]["size_source"] in {"schedule", "label"}
+        assert sheet[0]["derivation"]["formula"].startswith("2 *")
+        assert sheet[0]["derivation"]["inputs"]["width_mm"] == 600
+
+        # Round duct metal (DN250 label)
+        rnd_len = SHAPE_EMISSION_FACTOR * expected["round_duct"]["length_m"]
+        expected_rnd = 3.141592653589793 * 0.250 * rnd_len * 1.15
+        rnd = [
+            it for it in by_material.get("sheet_metal_m2", [])
+            if it["assembly_type"] == "duct_round"
+        ]
+        assert rnd, "no sheet_metal_m2 BOQ row for round duct"
+        assert sum(it["quantity"] for it in rnd) == pytest.approx(expected_rnd, rel=0.01)
+
+        # Pipe + insulation present with provenance (DN150)
+        assert by_material.get("pipe_m"), "no pipe_m row"
+        assert all(
+            it["size_source"] in {"schedule", "label", "geometry", "assumed"}
+            for it in by_material["pipe_m"]
+        )
+        pipe_len = SHAPE_EMISSION_FACTOR * expected["pipe"]["length_m"]
+        expected_pipe_m = pipe_len * 1.05  # +5% waste
+        assert sum(it["quantity"] for it in by_material["pipe_m"]) == pytest.approx(
+            expected_pipe_m, rel=0.01
+        )
+
+        # Equipment counted: 2 units -> connectors + isolators
+        connectors = by_material.get("unit_connector", [])
+        assert sum(it["quantity"] for it in connectors) == pytest.approx(
+            expected["equipment_count"] * 1.0
+        )
+        isolators = by_material.get("vibration_isolator", [])
+        assert sum(it["quantity"] for it in isolators) == pytest.approx(
+            expected["equipment_count"] * 4.0
+        )
+        assert all(it["source_path_ids"] for it in connectors)
+
+    def test_electrical_outputs_unchanged(self, client):
+        """Phase 2 regression lock: no mechanical rows on the electrical sheet."""
+        if not os.path.exists(SAMPLE):
+            pytest.skip("sample PDF not present locally")
+        with open(SAMPLE, "rb") as f:
+            response = client.post(
+                "/api/e2e/run",
+                files={"file": ("sample.pdf", f, "application/pdf")},
+            )
+        assert response.status_code == 200
+        body = response.json()
+        mechanical = {it["assembly_type"] for it in body["boq_items"]} & {
+            "duct_rectangular", "duct_round", "pipe_insulated", "hvac_equipment",
+        }
+        assert mechanical == set()
+        types = {it["assembly_type"] for it in body["boq_items"]}
+        assert "cable_tray" in types

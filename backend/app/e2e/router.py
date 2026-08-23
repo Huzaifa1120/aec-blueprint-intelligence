@@ -33,13 +33,25 @@ from app.ingestion.router import classify_upload
 from app.ingestion.vector import parse_pdf
 from app.parsing.scale import detect_scale
 from app.parsing.routes import measure_routes
+from app.parsing.sizes import detect_schedule_rows, resolve_route_size
 from app.parsing.components import count_components
 from app.parsing.layer_map import layer_to_assembly, route_layers
-from app.assembly.rules import apply_assembly
+from app.assembly.rules import apply_assembly, load_assembly_rule
 from app.catalog.prices import compute_boq_item
 
 
 router = APIRouter(prefix="/api/e2e", tags=["e2e"])
+
+# Length-based assemblies: measured routes only (never point-based symbols).
+ROUTE_ASSEMBLIES = {
+    "cable_tray",
+    "conduit",
+    "duct_rectangular",
+    "duct_round",
+    "pipe_insulated",
+}
+# Mechanical route assemblies whose cross-section size drives the formulas.
+SIZED_ASSEMBLIES = {"duct_rectangular", "duct_round", "pipe_insulated"}
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +65,8 @@ def _boq_line(
     source_path_ids: List[str],
     db: OrmSession,
     source_quality: str = "layered_vector",
+    derivation: Any = None,
+    size_source: str = None,
 ) -> Dict[str, Any]:
     from app.core.config import get_settings
 
@@ -73,7 +87,26 @@ def _boq_line(
         "confidence_score": base_score,
         "source_quality": source_quality,
         "source_path_ids": source_path_ids,
+        "derivation": derivation,
+        "size_source": size_source,
     }
+
+
+def _adapt_spans_for_cascade(raw_text_spans: List[Dict]) -> List[Dict]:
+    """Map PyMuPDF span dicts ({text, bbox}) to the cascade's x0..y1 shape."""
+    adapted: List[Dict] = []
+    for span in raw_text_spans:
+        bbox = span.get("bbox")
+        if not bbox or len(bbox) < 4:
+            continue
+        adapted.append({
+            "text": span.get("text", ""),
+            "x0": float(bbox[0]),
+            "y0": float(bbox[1]),
+            "x1": float(bbox[2]),
+            "y1": float(bbox[3]),
+        })
+    return adapted
 
 
 # ---------------------------------------------------------------------------
@@ -115,8 +148,10 @@ def e2e_run(
         scale = detect_scale(parsed.get("raw_text_spans", []))
         clusters = parsed.get("clusters", [])
         raw_drawings = parsed.get("raw_drawings", [])
+        cascade_spans = _adapt_spans_for_cascade(parsed.get("raw_text_spans", []))
+        schedule_rows = detect_schedule_rows(cascade_spans)
 
-        # 3️⃣ Measure routes (length-based assemblies: cable tray, conduit)
+        # 3️⃣ Measure routes (length-based assemblies: tray, conduit, ducts, pipes)
         route_layer_names = tuple(route_layers())
         routes = measure_routes(clusters, raw_drawings, scale, route_layer_names)
 
@@ -128,20 +163,44 @@ def e2e_run(
         with OrmSession(get_engine()) as db:
             # Route BOQ: quantity scales with measured length
             # Routes must ONLY evaluate against route-based assembly rules
-            # Strict filter: route geometries must only map to route-based assemblies
-            # (cable_tray, conduit) and never to point-based assemblies (lighting, switches, etc.)
             for route in routes:
                 layer = route.get("layer", "")
                 resolved_assembly = layer_to_assembly(layer)
                 # Use resolved layer assembly if available, fall back to route type
                 assembly_type = resolved_assembly if resolved_assembly else route.get("type", "")
-                # Enforce: routes must only use route-based assembly rules
-                # Point-based assemblies (lighting, switch, socket, etc.) are strictly excluded
-                if assembly_type not in {"cable_tray", "conduit"}:
+                if assembly_type not in ROUTE_ASSEMBLIES:
                     continue
-                applied = apply_assembly(assembly_type)
+
+                variables = None
+                size_source = None
+                if assembly_type in SIZED_ASSEMBLIES:
+                    mech_rule = load_assembly_rule(assembly_type) or {}
+                    size = resolve_route_size(
+                        route,
+                        cascade_spans,
+                        scale,
+                        schedule_rows=schedule_rows,
+                        default_size=mech_rule.get("defaults") or None,
+                    )
+                    if size is None:
+                        continue
+                    size_source = size.get("source")
+                    variables = {"length_m": route["length_m"], **{
+                        k: v for k, v in size.items()
+                        if k in ("width_mm", "height_mm", "diameter_mm")
+                    }}
+                    if assembly_type == "duct_rectangular":
+                        variables["max_mm"] = max(
+                            variables.get("width_mm", 0), variables.get("height_mm", 0)
+                        )
+                    elif assembly_type in {"duct_round", "pipe_insulated"}:
+                        variables["max_mm"] = variables.get("diameter_mm", 0)
+
+                applied = apply_assembly(assembly_type, variables=variables)
                 for mat in applied.get("materials", []):
-                    quantity = mat["quantity"] * route["length_m"]
+                    quantity = mat["quantity"]
+                    if "formula" not in (mat.get("derivation") or {}):
+                        quantity *= route["length_m"]
                     boq_items.append(
                         _boq_line(
                             assembly_type,
@@ -151,38 +210,41 @@ def e2e_run(
                             route.get("source_path_ids", []),
                             db,
                             source_quality=source_quality,
+                            derivation=mat.get("derivation"),
+                            size_source=size_source,
                         )
                     )
 
             # Component BOQ: one assembly instance per counted symbol
-            # Enforce strict 1-to-1 layer-to-assembly matching
-            # Before applying any rule, verify the component's resolved type
-            # exactly matches the rule name. This prevents access_control_door
-            # components from yielding lighting_outlet, cable_tray, or other
-            # unrelated assemblies.
+            # Enforce strict 1-to-1 layer-to-assembly matching (Phase 2 rule).
             for comp in components:
                 resolved_type = comp.get("assembly_type")
 
-                # Load available assembly rules from the rules engine
-                from app.assembly.rules import load_assembly_rule as _load_rule
-                rule = _load_rule(resolved_type)
-                if rule is None or resolved_type != rule.get("name", resolved_type):
-                    # STRICT SKIP: Do not apply lighting_outlet to access_control_door
+                # Sized route assemblies are quantified by the ROUTE loop
+                # (formula needs per-route size variables); a duct/pipe
+                # cluster surfacing here is geometry, not a countable symbol.
+                if resolved_type in SIZED_ASSEMBLIES:
                     continue
 
-                assembly_type = resolved_type
-                applied = apply_assembly(assembly_type)
+                rule = load_assembly_rule(resolved_type)
+                if rule is None or resolved_type != rule.get("name", resolved_type):
+                    # STRICT SKIP: never apply an unrelated rule to a component
+                    continue
+
+                applied = apply_assembly(resolved_type)
                 for mat in applied.get("materials", []):
                     quantity = mat["quantity"] * comp["count"]
                     boq_items.append(
                         _boq_line(
-                            assembly_type,
+                            resolved_type,
                             mat["material_name"],
                             quantity,
                             comp.get("confidence_status", "MEASURED"),
                             comp.get("source_path_ids", []),
                             db,
                             source_quality=source_quality,
+                            derivation=mat.get("derivation"),
+                            size_source=None,
                         )
                     )
 
