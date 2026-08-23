@@ -12,8 +12,14 @@ from __future__ import annotations
 
 import yaml
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, List, Optional, Any
 
+from app.assembly.formulas import (
+    FormulaValidationError,
+    evaluate_formula,
+    lookup_gauge,
+    validate_formula,
+)
 from app.db.models.catalog import Assembly, Material
 
 
@@ -23,12 +29,37 @@ from app.db.models.catalog import Assembly, Material
 
 _ASSEMBLIES_DIR = Path(__file__).resolve().parents[3] / "data" / "assemblies"
 
+# Cross-section variables derivable from other bound inputs. A rule may drive
+# a gauge table with these without the caller supplying them explicitly.
+_DERIVED_VARIABLE_SOURCES: Dict[str, tuple] = {
+    "max_mm": ("width_mm", "height_mm", "diameter_mm"),
+}
+
+
+def _effective_variables(
+    rule: Dict, variables: Optional[Dict[str, float]]
+) -> Dict[str, float]:
+    """Bind evaluation inputs: rule defaults < caller variables < derived."""
+    effective: Dict[str, float] = {}
+    for key, value in (rule.get("defaults") or {}).items():
+        effective[key] = float(value)
+    for key, value in (variables or {}).items():
+        effective[key] = float(value)
+    for derived, sources in _DERIVED_VARIABLE_SOURCES.items():
+        if derived not in effective:
+            candidates = [float(effective[s]) for s in sources if s in effective]
+            if candidates:
+                effective[derived] = max(candidates)
+    return effective
+
 
 def load_assembly_rule(name: str) -> Optional[Dict]:
     """Load a YAML rule set by assembly name.
 
-    Returns dict with keys: name, rule_version, bom, labor, waste_factor
-    or None if not found.
+    Returns dict with keys: name, rule_version, bom, labor, waste_factor,
+    variables, defaults or None if not found. BOM entries may be plain
+    numbers (legacy linear multipliers) or dicts with ``formula`` /
+    ``gauge_lookup`` (optionally ``waste_factor``).
     """
     yaml_path = _ASSEMBLIES_DIR / f"{name}.yaml"
     if not yaml_path.exists():
@@ -43,6 +74,8 @@ def load_assembly_rule(name: str) -> Optional[Dict]:
         "bom": data.get("bom", {}),
         "labor": data.get("labor", {}),
         "waste_factor": data.get("waste_factor", 0.10),
+        "variables": data.get("variables", []) or [],
+        "defaults": data.get("defaults", {}) or {},
     }
 
 
@@ -53,14 +86,17 @@ def load_assembly_rule(name: str) -> Optional[Dict]:
 def apply_assembly(
     component_type: str,
     rule_name: str = "",
+    variables: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
-    """Apply an assembly rule set to a component type.
+    """Apply an assembly rule set, evaluating formula BOM lines when present.
 
-    Returns dict with derived quantities:
-    - materials: List[Dict] with {material_name, quantity, unit}
-    - labor_hours: float
-    - waste_factor: float
-    - rule_version: str
+    Legacy linear multipliers (plain numbers) behave exactly as before —
+    except on rules that declare ``length_m`` as a driver variable, where a
+    constant line is per-unit-length and scales by the bound length (route
+    rules). Formula entries require bindable variables (fail closed
+    otherwise). Each material dict gains ``derivation``: None for constants,
+    or {"formula": ..., "inputs": ...} / {"gauge_lookup": ..., "inputs": ...}
+    where ``inputs`` snapshots the caller-supplied variables exactly.
 
     Constraint: Rules loaded from YAML, never hardcoded.
     """
@@ -77,29 +113,103 @@ def apply_assembly(
             "error": f"Assembly rule '{rule_name}' not found",
         }
 
-    bom = rule["bom"]
-    labor = rule["labor"]
-    waste_factor = rule["waste_factor"]
-    rule_version = rule["rule_version"]
+    caller_vars = dict(variables or {})
+    effective = _effective_variables(rule, caller_vars)
+    declared = set(rule.get("variables") or [])
+    needs_variables = any(isinstance(entry, dict) for entry in rule["bom"].values())
+    if needs_variables and not effective:
+        raise FormulaValidationError(
+            "rule contains formulas but no variables were supplied",
+            rule_name=lookup_name,
+        )
 
-    # Build materials list from BOM
     materials = []
-    for mat_name, quantity in bom.items():
-        materials.append({
-            "material_name": mat_name,
-            "quantity": quantity,
-            "unit": _infer_unit(mat_name),
-        })
+    for mat_name, entry in rule["bom"].items():
+        if isinstance(entry, dict) and "formula" in entry:
+            quantity = evaluate_formula(entry["formula"], effective, lookup_name)
+            waste = float(entry.get("waste_factor", rule["waste_factor"]))
+            quantity *= 1.0 + waste
+            materials.append({
+                "material_name": mat_name,
+                "quantity": quantity,
+                "unit": _infer_unit(mat_name),
+                "derivation": {"formula": entry["formula"], "inputs": caller_vars},
+            })
+        elif isinstance(entry, dict) and "gauge_lookup" in entry:
+            resolved = lookup_gauge(entry["gauge_lookup"], effective)
+            materials.append({
+                "material_name": resolved,
+                "quantity": 1.0,
+                "unit": "ea",
+                "derivation": {
+                    "gauge_lookup": entry["gauge_lookup"],
+                    "inputs": caller_vars,
+                },
+            })
+        else:
+            # legacy: constant multiplier per unit quantity (per unit length
+            # when the rule declares length_m as a driver variable)
+            quantity = float(entry)
+            if "length_m" in declared and "length_m" in effective:
+                quantity *= float(effective["length_m"])
+            materials.append({
+                "material_name": mat_name,
+                "quantity": quantity,
+                "unit": _infer_unit(mat_name),
+                "derivation": None,
+            })
 
     # Derive labor hours from rule
-    inst_hours = labor.get("installation_hours", 0.0)
+    inst_hours = rule["labor"].get("installation_hours", 0.0)
 
     return {
         "materials": materials,
         "labor_hours": float(inst_hours),
-        "waste_factor": float(waste_factor),
-        "rule_version": rule_version,
+        "waste_factor": float(rule["waste_factor"]),
+        "rule_version": rule["rule_version"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed rule validation (catalog load gate)
+# ---------------------------------------------------------------------------
+
+def validate_rule_file(path: Path) -> List[str]:
+    """Validate one rule YAML. Returns error strings; empty list = valid.
+
+    Fail-closed: a rule with any error must be excluded from the catalog.
+    """
+    errors: List[str] = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except yaml.YAMLError as exc:
+        return [f"{path.name}: YAML parse error: {exc}"]
+
+    name = data.get("name", path.stem)
+    declared = data.get("variables", []) or []
+    for mat_name, entry in (data.get("bom") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        formula = entry.get("formula")
+        if formula is not None:
+            try:
+                validate_formula(formula, declared, rule_name=name)
+            except FormulaValidationError as exc:
+                errors.append(f"{path.name}: bom.{mat_name}: disallowed formula: {exc}")
+        if "gauge_lookup" in entry:
+            table = entry.get("gauge_lookup") or {}
+            driver = table.get("by", "")
+            if (
+                driver
+                and driver not in declared
+                and driver not in _DERIVED_VARIABLE_SOURCES
+            ):
+                errors.append(
+                    f"{path.name}: bom.{mat_name}: gauge driver "
+                    f"'{driver}' not in declared variables"
+                )
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +267,10 @@ def persist_assembly_to_db(
         assembly.formula_or_bom = bom
 
     # Link materials via assembly_materials junction table
-    for mat_name, quantity in bom.items():
+    for mat_name, entry in bom.items():
+        # Formula/gauge lines persist at nominal quantity 1.0; real
+        # quantities live on BOQ rows (derived per component/route).
+        quantity = entry if isinstance(entry, (int, float)) else 1.0
         # Find or create Material record
         material = (
             session.query(Material)
