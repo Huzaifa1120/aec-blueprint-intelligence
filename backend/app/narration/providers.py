@@ -1,0 +1,151 @@
+"""Narration providers — deterministic template default + gated Anthropic adapter.
+
+Constraints (spec v3 §4.9, AGENTS.md §1):
+- TemplateNarrator is the always-available default; it renders payload numbers
+  verbatim via str() — no rounding, no arithmetic, no invented values.
+- AnthropicNarrator is import-gated: the SDK is NOT in pyproject.toml and is
+  only activated when ANTHROPIC_API_KEY is set AND the package imports. Its
+  prompt carries only the serialized payload plus an instruction that the
+  model may not introduce numbers.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import typing
+from typing import Protocol
+
+try:  # optional runtime enhancement — mirrors the heavy-deps policy
+    import anthropic
+except ImportError:  # pragma: no cover - exercised implicitly when absent
+    anthropic = None
+
+logger = logging.getLogger(__name__)
+
+
+class NarrationResult(typing.TypedDict):
+    narrative: str
+    provider: str  # "template" | "anthropic"
+
+
+class NarratorProvider(Protocol):
+    name: str
+
+    def narrate(self, boq_payload: dict) -> NarrationResult: ...
+
+
+_ANTHROPIC_SYSTEM_PROMPT = (
+    "You are writing a scope-of-work narrative for a construction quantity "
+    "takeoff estimate. You will receive a JSON payload of BOQ rows. You may "
+    "not introduce numbers: every number in your output must be copied "
+    "verbatim from the payload. Do not compute, round, sum, or convert any "
+    "value. Do not add dates, prices, or counts that are not in the payload."
+)
+
+
+def _fmt(value: object) -> str:
+    """Format a structured number verbatim — never round or recompute."""
+    return str(value)
+
+
+class TemplateNarrator:
+    """Deterministic narrator: renders sections directly from payload rows."""
+
+    name = "template"
+
+    def narrate(self, boq_payload: dict) -> NarrationResult:
+        materials: list[dict] = boq_payload.get("materials") or []
+        routes: list[dict] = boq_payload.get("routes") or []
+        totals: dict = boq_payload.get("totals") or {}
+
+        priced = [m for m in materials if not m.get("unpriced")]
+        unpriced = [m for m in materials if m.get("unpriced")]
+
+        lines: list[str] = ["SCOPE OF WORK", "", "Summary"]
+        lines.append(f"- Material line items: {len(materials)}")
+        if "grand" in totals:
+            lines.append(f"- Grand total cost: {_fmt(totals['grand'])}")
+
+        lines.extend(["", "Materials"])
+        if not priced and not unpriced:
+            lines.append("- No material line items recorded.")
+        for item in priced:
+            label = item.get("material_name") or "unnamed item"
+            parts = [f"- {label}: quantity {_fmt(item['quantity'])}"]
+            if item.get("total_cost") is not None:
+                parts.append(f"total cost {_fmt(item['total_cost'])}")
+            lines.append(", ".join(parts) + ".")
+
+        if routes:
+            lines.extend(["", "Measured Routes"])
+            for route in routes:
+                label = route.get("route_type") or "route"
+                length = route.get("length_m")
+                if length is None:
+                    continue
+                detail = f"- {label}: length {_fmt(length)} m"
+                if not route.get("unpriced") and route.get("total_cost") is not None:
+                    detail += f", total cost {_fmt(route['total_cost'])}"
+                size_json = route.get("size_json")
+                if isinstance(size_json, dict):
+                    ref = size_json.get("ref")
+                    if ref:
+                        detail += f" (size ref {ref})"
+                lines.append(detail + ".")
+
+        if totals:
+            lines.extend(["", "Labor"])
+            if "labor" in totals:
+                lines.append(f"- Total labor cost: {_fmt(totals['labor'])}")
+            else:
+                lines.append("- No labor costs recorded.")
+
+        if unpriced:
+            lines.extend(["", "Unpriced Items"])
+            for item in unpriced:
+                label = item.get("material_name") or "unnamed item"
+                lines.append(f"- {label}: UNPRICED - review required.")
+
+        return {"narrative": "\n".join(lines), "provider": self.name}
+
+
+class AnthropicNarrator:
+    """LLM-assisted narration; prompt forbids introducing any number."""
+
+    name = "anthropic"
+
+    def __init__(self, client: object | None = None, model: str = "claude-sonnet-4-5") -> None:
+        self._client = client
+        self._model = model
+
+    def _call_client(self, system: str, prompt: str) -> str:
+        if self._client is None:
+            if anthropic is None:
+                raise RuntimeError("anthropic SDK not installed")
+            self._client = anthropic.Anthropic()
+        response = self._client.messages.create(
+            model=self._model,
+            max_tokens=1024,
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return "".join(block.text for block in response.content)
+
+    def narrate(self, boq_payload: dict) -> NarrationResult:
+        payload_json = json.dumps(boq_payload, indent=2, sort_keys=True)
+        prompt = (
+            "Write a concise scope-of-work narrative from the payload below. "
+            "You may not introduce numbers; copy every number verbatim.\n\n"
+            f"{payload_json}"
+        )
+        narrative = self._call_client(_ANTHROPIC_SYSTEM_PROMPT, prompt)
+        return {"narrative": narrative, "provider": self.name}
+
+
+def get_provider() -> NarratorProvider:
+    """Anthropic iff env key set AND sdk importable, else template."""
+    if os.environ.get("ANTHROPIC_API_KEY") and anthropic is not None:
+        return AnthropicNarrator()
+    return TemplateNarrator()
