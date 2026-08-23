@@ -49,10 +49,14 @@ def _walk(node: ast.AST, allowed_vars: Set[str], rule_name: str, expression: str
             raise FormulaValidationError(
                 "function calls restricted to min/max/round/abs", rule_name, expression
             )
+        if node.keywords:  # ast.keyword nodes are rejected outright
+            raise FormulaValidationError(
+                f"disallowed syntax: {type(node.keywords[0]).__name__}",
+                rule_name,
+                expression,
+            )
         for arg in node.args:
             _walk(arg, allowed_vars, rule_name, expression)
-    elif isinstance(node, ast.keyword):  # pragma: no cover - round(x, n) uses args only
-        _walk(node.value, allowed_vars, rule_name, expression)
     else:
         raise FormulaValidationError(
             f"disallowed syntax: {type(node).__name__}", rule_name, expression
@@ -76,8 +80,21 @@ def evaluate_formula(
     """Evaluate a validated formula with bound variables.
 
     Raises FormulaValidationError for unknown/missing variables at eval time
-    (validate first at load time; this catches binding mistakes).
+    (validate first at load time; this catches binding mistakes), for
+    pathological expressions (huge exponents, nesting beyond Python's
+    recursion limit) and for ill-formed function calls.
     """
+    try:
+        return _evaluate_formula(expression, variables, rule_name)
+    except RecursionError as exc:
+        raise FormulaValidationError(
+            f"expression nesting too deep: {exc}", rule_name, expression
+        ) from exc
+
+
+def _evaluate_formula(
+    expression: str, variables: Dict[str, float], rule_name: str
+) -> float:
     validate_formula(expression, variables.keys(), rule_name)
     tree = ast.parse(expression, mode="eval")
 
@@ -106,13 +123,34 @@ def evaluate_formula(
             if isinstance(node.op, ast.Div):
                 return left / right
             if isinstance(node.op, ast.Pow):
+                exponent = node.right
+                if isinstance(exponent, ast.UnaryOp) and isinstance(
+                    exponent.op, _ALLOWED_UNARYOPS
+                ):
+                    exponent = exponent.operand
+                if (
+                    isinstance(exponent, ast.Constant)
+                    and isinstance(exponent.value, (int, float))
+                    and abs(exponent.value) > 1000
+                ):
+                    raise FormulaValidationError(
+                        f"exponent magnitude {exponent.value} rejected (>1000)",
+                        rule_name,
+                        expression,
+                    )
                 return left ** right
         if isinstance(node, ast.UnaryOp):
             operand = _eval(node.operand)
             return operand if isinstance(node.op, ast.UAdd) else -operand
         if isinstance(node, ast.Call):
             func = _eval(node.func)
-            return float(func(*[_eval(a) for a in node.args]))
+            args = [_eval(a) for a in node.args]
+            try:
+                return float(func(*args))
+            except TypeError as exc:
+                raise FormulaValidationError(
+                    f"invalid function call: {exc}", rule_name, expression
+                ) from exc
         raise FormulaValidationError(
             f"cannot evaluate: {type(node).__name__}", rule_name, expression
         )

@@ -43,6 +43,30 @@ class TestEvaluateFormula:
         with pytest.raises(ZeroDivisionError):
             evaluate_formula("length_m / 0", {"length_m": 1.0})
 
+    def test_bad_call_raises_validation_error(self):
+        # round() with no args -> TypeError inside the evaluator
+        with pytest.raises(FormulaValidationError):
+            evaluate_formula("round()", {})
+        # min() needs at least two args
+        with pytest.raises(FormulaValidationError):
+            evaluate_formula("min(1)", {})
+
+    def test_huge_exponent_rejected(self):
+        with pytest.raises(FormulaValidationError):
+            evaluate_formula("2 ** 99999", {})
+        with pytest.raises(FormulaValidationError):
+            evaluate_formula("2 ** -1001", {})
+        assert evaluate_formula("2 ** 10", {}) == pytest.approx(1024)
+
+    def test_deep_nesting_rejected(self):
+        # Same-precedence operator chains parse iteratively (no parser
+        # nesting cap) but build a left-leaning AST that recurses one frame
+        # per term in the evaluator walker.
+        expr = "+".join(["1"] * 5000)
+        with pytest.raises(FormulaValidationError) as exc:
+            evaluate_formula(expr, {})
+        assert "nesting too deep" in str(exc.value)
+
 
 class TestValidateFormula:
     def test_valid_formulas_pass(self):
@@ -75,6 +99,10 @@ class TestValidateFormula:
     def test_syntax_error_rejected(self):
         with pytest.raises(FormulaValidationError):
             validate_formula("2 * +", [])
+
+    def test_keyword_arguments_rejected(self):
+        with pytest.raises(FormulaValidationError):
+            validate_formula("round(x=1.234)", [])
 
     def test_error_carries_rule_context(self):
         with pytest.raises(FormulaValidationError) as exc:
