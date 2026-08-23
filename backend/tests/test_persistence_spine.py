@@ -84,6 +84,73 @@ def test_replay_ok_then_tamper_409():
     assert r.json()["mismatches"], "409 body must list offending boq_item ids"
 
 
+def test_replay_corrupt_derivation_json_fails_honest_409():
+    """Corrupt / un-dict derivation_json is a mismatch, never 'unchecked'."""
+    from app.db.models.estimate import BoqItem
+
+    def _corrupt_case(sheet_name: str, bad_payload: str):
+        extraction = SheetExtraction(
+            sheet_name=sheet_name,
+            page_number=1,
+            scale="1:100",
+            layers=[LayerRow("M-DUCT", "mechanical")],
+            routes=[
+                RouteRow(
+                    "duct",
+                    "M-DUCT",
+                    12.5,
+                    size_json={"width_mm": 600, "height_mm": 400, "source": "label"},
+                )
+            ],
+        )
+        with OrmSession(get_engine()) as db:
+            est = persist_extraction(db, None, extraction)
+        with OrmSession(get_engine()) as db:
+            item = db.query(BoqItem).filter_by(estimate_id=est).first()
+            item_id = item.id
+            item.derivation_json = bad_payload
+            db.commit()
+        r = _client().get(f"/api/estimates/{est}/replay")
+        assert r.status_code == 409, (sheet_name, r.status_code, r.text)
+        assert str(item_id) in r.json()["mismatches"], sheet_name
+
+    _corrupt_case("TEST-SHEET-CORRUPT-JSON", "not json{")
+    _corrupt_case("TEST-SHEET-CORRUPT-TYPE", "[1, 2, 3]")  # valid JSON, not a dict
+
+
+def test_replay_uses_rule_defaults_when_size_incomplete():
+    """Replay reproduces quantities computed WITH YAML rule defaults.
+
+    persist_extraction snapshots only caller-supplied variables into the
+    derivation inputs, while apply_assembly evaluated with rule defaults
+    bound underneath. Replay must merge the declared rule defaults back
+    under the recorded inputs or every default-filled size false-positives
+    a tamper 409.
+    """
+    extraction = SheetExtraction(
+        sheet_name="TEST-SHEET-RULE-DEFAULTS",
+        page_number=1,
+        scale="1:100",
+        layers=[LayerRow("M-DUCT", "mechanical")],
+        routes=[
+            RouteRow(
+                "duct_rectangular",
+                "M-DUCT",
+                10.0,
+                size_json={"width_mm": 600, "source": "label"},
+            )
+        ],
+    )
+    with OrmSession(get_engine()) as db:
+        est = persist_extraction(db, None, extraction)
+    c = _client()
+    r = c.get(f"/api/estimates/{est}/replay")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["checked"] > 0
+    assert body["mismatches"] == []
+
+
 def test_unpriced_items_keep_flag():
     """Unpriced gap survives the round trip — never silently $0 (trap §2)."""
     extraction = SheetExtraction(

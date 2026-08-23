@@ -15,6 +15,12 @@
     - ``gauge_lookup`` -> lookup_gauge(table, inputs) equals resolved value
     - anything else    -> skipped, counted unchecked
 
+    Evaluation inputs reproduce ``apply_assembly``'s binding order exactly:
+    the derivation's rule YAML ``defaults`` sit UNDER the recorded input
+    snapshot (recorded values win), then derived variables such as
+    ``max_mm`` are recomputed. A corrupt or non-dict ``derivation_json``
+    fails honest as a mismatch — it can never hide as "unchecked".
+
     200 ``{checked, mismatches: []}`` when every checked item reproduces;
     409 ``{detail, mismatches: [boq_item_id, ...]}`` listing offenders when
     any recomputation diverges. A tampered database can never replay clean.
@@ -35,6 +41,7 @@ from app.assembly.formulas import (
     evaluate_formula,
     lookup_gauge,
 )
+from app.assembly.rules import load_assembly_rule
 from app.db.models.estimate import BoqItem, Estimate
 from app.db.session import get_db
 
@@ -42,8 +49,11 @@ router = APIRouter(prefix="/api/estimates", tags=["estimates"])
 
 _TOLERANCE = 1e-6
 
+_RECOGNIZED_BRANCHES = ("formula", "linear_per_m", "gauge_lookup")
+
 
 def _parse_json_object(raw: str | None) -> dict | None:
+    """Tolerant parse for read paths; None on anything unparseable."""
     if not raw:
         return None
     try:
@@ -51,6 +61,25 @@ def _parse_json_object(raw: str | None) -> dict | None:
     except ValueError:
         return None
     return value if isinstance(value, dict) else None
+
+
+def _load_derivation(raw: str | None) -> tuple[dict | None, bool]:
+    """Strict parse for the replay gate.
+
+    Returns ``(derivation, corrupt)`` where ``corrupt`` marks a payload that
+    is present but unparseable or not a JSON object — those must fail honest
+    as mismatches. A NULL/empty column means nothing was recorded and stays
+    an unchecked skip.
+    """
+    if raw is None or raw == "":
+        return None, False
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return None, True
+    if not isinstance(value, dict):
+        return None, True
+    return value, False
 
 
 def _material_name(derivation: dict, measurement: object) -> str:
@@ -121,16 +150,33 @@ def get_estimate_boq(
 # ---------------------------------------------------------------------------
 # Replay determinism gate
 # ---------------------------------------------------------------------------
-def _bind_derived_inputs(inputs: dict) -> dict[str, float]:
-    """Bind rule-derivable variables (max_mm) the way rules.py does.
+def _rule_defaults(rule_name: object) -> dict[str, float]:
+    """Numeric ``defaults`` declared by the derivation's YAML rule."""
+    if not isinstance(rule_name, str) or not rule_name:
+        return {}
+    rule = load_assembly_rule(rule_name) or {}
+    defaults: dict[str, float] = {}
+    for key, value in (rule.get("defaults") or {}).items():
+        try:
+            defaults[str(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return defaults
 
-    ``apply_assembly`` derives ``max_mm = max(width_mm, height_mm,
-    diameter_mm)`` before evaluating formulas/gauges; the stored ``inputs``
-    snapshot holds only caller-supplied variables, so replay re-derives it
-    here to reproduce the exact evaluation context.
+
+def _evaluation_inputs(derivation: dict) -> dict[str, float]:
+    """Reproduce apply_assembly's binding: defaults < recorded < derived.
+
+    The stored ``inputs`` snapshot holds only caller-supplied variables, but
+    quantities were computed with the rule's YAML ``defaults`` underneath
+    (rules.py ``_effective_variables``). Replay merges those defaults back
+    under the snapshot — recorded values win — then re-derives variables
+    such as ``max_mm`` to reproduce the exact evaluation context.
     """
     merged: dict[str, float] = {}
-    for key, value in inputs.items():
+    for key, value in _rule_defaults(derivation.get("rule_name")).items():
+        merged[key] = value
+    for key, value in (derivation.get("inputs") or {}).items():
         try:
             merged[key] = float(value)
         except (TypeError, ValueError):
@@ -146,18 +192,14 @@ def _bind_derived_inputs(inputs: dict) -> dict[str, float]:
     return merged
 
 
-def _replay_item(item: BoqItem) -> bool:
+def _replay_item(item: BoqItem, derivation: dict) -> bool:
     """Recompute one BoqItem's quantity from its recorded derivation."""
-    derivation = _parse_json_object(item.derivation_json)
-    if not derivation:
-        return True  # nothing recorded: unchecked skip
-
     tolerance = _TOLERANCE * max(1.0, float(item.quantity))
 
     def _matches(expected: float) -> bool:
         return abs(float(expected) - float(item.quantity)) <= tolerance
 
-    inputs = _bind_derived_inputs(derivation.get("inputs") or {})
+    inputs = _evaluation_inputs(derivation)
     try:
         if "formula" in derivation:
             expected = evaluate_formula(str(derivation["formula"]), inputs)
@@ -193,15 +235,19 @@ def replay_estimate(
     checked = 0
     unchecked = 0
     for item in estimate.boq_items:
-        derivation = _parse_json_object(item.derivation_json)
-        recognized = bool(derivation) and any(
-            key in derivation for key in ("formula", "linear_per_m", "gauge_lookup")
-        )
+        derivation, corrupt = _load_derivation(item.derivation_json)
+        if corrupt:
+            # Present-but-unparseable payload: fail honest, never hide as
+            # unchecked (F2).
+            checked += 1
+            mismatches.append(str(item.id))
+            continue
+        recognized = bool(derivation) and any(key in derivation for key in _RECOGNIZED_BRANCHES)
         if not recognized:
             unchecked += 1
             continue
         checked += 1
-        if not _replay_item(item):
+        if not _replay_item(item, derivation):
             mismatches.append(str(item.id))
 
     if mismatches:
