@@ -10,6 +10,8 @@ Adding a new assembly type requires YAML edit, not code change.
 
 from __future__ import annotations
 
+import logging
+
 import yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -21,6 +23,9 @@ from app.assembly.formulas import (
     validate_formula,
 )
 from app.db.models.catalog import Assembly, Material
+
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +58,40 @@ def _effective_variables(
     return effective
 
 
+def _validate_rule_data(data: Dict, source_name: str) -> List[str]:
+    """Validate parsed rule data. Returns error strings; empty list = valid.
+
+    Shared by ``validate_rule_file`` (catalog import gate) and
+    ``load_assembly_rule`` (runtime load gate) so both fail closed on the
+    same conditions.
+    """
+    errors: List[str] = []
+    name = data.get("name", Path(source_name).stem)
+    declared = data.get("variables", []) or []
+    for mat_name, entry in (data.get("bom") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        formula = entry.get("formula")
+        if formula is not None:
+            try:
+                validate_formula(formula, declared, rule_name=name)
+            except FormulaValidationError as exc:
+                errors.append(f"{source_name}: bom.{mat_name}: disallowed formula: {exc}")
+        if "gauge_lookup" in entry:
+            table = entry.get("gauge_lookup") or {}
+            driver = table.get("by", "")
+            if (
+                driver
+                and driver not in declared
+                and driver not in _DERIVED_VARIABLE_SOURCES
+            ):
+                errors.append(
+                    f"{source_name}: bom.{mat_name}: gauge driver "
+                    f"'{driver}' not in declared variables"
+                )
+    return errors
+
+
 def load_assembly_rule(name: str) -> Optional[Dict]:
     """Load a YAML rule set by assembly name.
 
@@ -60,13 +99,28 @@ def load_assembly_rule(name: str) -> Optional[Dict]:
     variables, defaults or None if not found. BOM entries may be plain
     numbers (legacy linear multipliers) or dicts with ``formula`` /
     ``gauge_lookup`` (optionally ``waste_factor``).
+
+    Fail-closed gate: a rule file that fails the same validation as
+    ``validate_rule_file`` is excluded (returns None) with a warning —
+    the rest of the catalog keeps serving.
     """
     yaml_path = _ASSEMBLIES_DIR / f"{name}.yaml"
     if not yaml_path.exists():
         return None
 
-    with open(yaml_path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+    try:
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as exc:
+        logger.warning("excluding unreadable assembly rule %s: %s", name, exc)
+        return None
+
+    data = data if isinstance(data, dict) else {}
+    errors = _validate_rule_data(data, yaml_path.name)
+    if errors:
+        for error in errors:
+            logger.warning("excluding invalid assembly rule: %s", error)
+        return None
 
     return {
         "name": data.get("name", name),
@@ -179,37 +233,13 @@ def validate_rule_file(path: Path) -> List[str]:
 
     Fail-closed: a rule with any error must be excluded from the catalog.
     """
-    errors: List[str] = []
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
     except yaml.YAMLError as exc:
         return [f"{path.name}: YAML parse error: {exc}"]
 
-    name = data.get("name", path.stem)
-    declared = data.get("variables", []) or []
-    for mat_name, entry in (data.get("bom") or {}).items():
-        if not isinstance(entry, dict):
-            continue
-        formula = entry.get("formula")
-        if formula is not None:
-            try:
-                validate_formula(formula, declared, rule_name=name)
-            except FormulaValidationError as exc:
-                errors.append(f"{path.name}: bom.{mat_name}: disallowed formula: {exc}")
-        if "gauge_lookup" in entry:
-            table = entry.get("gauge_lookup") or {}
-            driver = table.get("by", "")
-            if (
-                driver
-                and driver not in declared
-                and driver not in _DERIVED_VARIABLE_SOURCES
-            ):
-                errors.append(
-                    f"{path.name}: bom.{mat_name}: gauge driver "
-                    f"'{driver}' not in declared variables"
-                )
-    return errors
+    return _validate_rule_data(data, path.name)
 
 
 # ---------------------------------------------------------------------------

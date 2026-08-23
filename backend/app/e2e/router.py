@@ -21,6 +21,7 @@ Trap compliance:
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from typing import List, Dict, Any
@@ -39,6 +40,8 @@ from app.parsing.layer_map import layer_to_assembly, route_layers
 from app.assembly.rules import apply_assembly, load_assembly_rule
 from app.catalog.prices import compute_boq_item
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/e2e", tags=["e2e"])
 
@@ -183,23 +186,42 @@ def e2e_run(
                         default_size=mech_rule.get("defaults") or None,
                     )
                     if size is None:
+                        logger.warning(
+                            "dropping %s route (%.3f m): no resolvable "
+                            "cross-section size and no configured default",
+                            assembly_type,
+                            route["length_m"],
+                        )
                         continue
                     size_source = size.get("source")
+                    # A cascade source above 'assumed' only holds if the
+                    # resolved size actually covers the rule's required size
+                    # variables; when defaults filled the gap the row must be
+                    # labelled ASSUMED (fail-honest provenance, spec §4).
+                    required_size_vars = set(mech_rule.get("variables") or []) - {
+                        "length_m",
+                        "max_mm",
+                    }
+                    if any(var not in size for var in required_size_vars):
+                        size_source = "assumed"
                     variables = {"length_m": route["length_m"], **{
                         k: v for k, v in size.items()
                         if k in ("width_mm", "height_mm", "diameter_mm")
                     }}
-                    if assembly_type == "duct_rectangular":
-                        variables["max_mm"] = max(
-                            variables.get("width_mm", 0), variables.get("height_mm", 0)
-                        )
-                    elif assembly_type in {"duct_round", "pipe_insulated"}:
-                        variables["max_mm"] = variables.get("diameter_mm", 0)
+                    # max_mm is derived inside rules.py from the bound
+                    # width/height/diameter — no manual duplication here.
 
                 applied = apply_assembly(assembly_type, variables=variables)
                 for mat in applied.get("materials", []):
                     quantity = mat["quantity"]
-                    if "formula" not in (mat.get("derivation") or {}):
+                    # Legacy electrical path (variables=None): constants are
+                    # per-unit-length multipliers scaled here. Mechanical
+                    # rules with bound variables already scale their constant
+                    # lines by length_m inside rules.py — scaling again would
+                    # square every fitting length (0.2 * L^2).
+                    if variables is None and "formula" not in (
+                        mat.get("derivation") or {}
+                    ):
                         quantity *= route["length_m"]
                     boq_items.append(
                         _boq_line(

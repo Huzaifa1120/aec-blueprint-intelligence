@@ -76,6 +76,24 @@ class TestMechanicalE2E:
         assert rnd, "no sheet_metal_m2 BOQ row for round duct"
         assert sum(it["quantity"] for it in rnd) == pytest.approx(expected_rnd, rel=0.01)
 
+        # Fittings scale LINEARLY with route length: rules.py scales the
+        # constant by length_m when variables are bound, so the router must
+        # pass quantities through untouched (a second scaling would square:
+        # 0.2 * L^2).
+        rect_fittings = [
+            it for it in by_material.get("duct_fitting", [])
+            if it["assembly_type"] == "duct_rectangular"
+        ]
+        assert rect_fittings, "no duct_fitting BOQ rows for rectangular duct"
+        assert sum(it["quantity"] for it in rect_fittings) == pytest.approx(
+            0.2 * SHAPE_EMISSION_FACTOR * expected["rect_duct"]["length_m"], rel=0.01
+        )
+
+        # Gauge-driven hangers resolve to the light kit for a 600mm duct
+        assert by_material.get("hanger_kit_light"), (
+            "no hanger_kit_light gauge rows in BOQ"
+        )
+
         # Pipe + insulation present with provenance (DN150)
         assert by_material.get("pipe_m"), "no pipe_m row"
         assert all(
