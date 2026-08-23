@@ -137,12 +137,13 @@ def resolve_route_size(
     schedule_rows: Optional[List[Dict]] = None,
     default_size: Optional[Dict] = None,
     label_proximity_pt: float = 25.0,
+    *,
     fixture_unit_size: Optional[Dict] = None,
 ) -> Optional[Dict]:
     """Resolve a route's cross-section size via the cascade (spec §4).
 
     Returns {"width_mm","height_mm"|"diameter_mm", "source", "ref"} or None.
-    ``fixture_unit_size`` (Phase 4) carries a caller-precomputed
+    ``fixture_unit_size`` (Phase 4, keyword-only) carries a caller-precomputed
     fixture-unit-based size; it outranks label/geometry/assumed but the
     schedule table still wins.
     """

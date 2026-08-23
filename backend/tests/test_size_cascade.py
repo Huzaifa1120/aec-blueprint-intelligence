@@ -170,3 +170,24 @@ def test_size_source_order_constant_updated():
     from app.parsing.sizes import SIZE_SOURCE_ORDER
 
     assert SIZE_SOURCE_ORDER == ("schedule", "fixture_units", "label", "geometry", "assumed")
+
+
+def test_mpipe_dn_label_resolves_at_label_tier():
+    # Regression pin: on the HVAC fixture's M-PIPE route with repeated DN150
+    # labels, this tier was corrected from ASSUMED ("configured_default") to
+    # LABEL by the Phase 4 shape-gate extension (2026-08-24) that treats
+    # pipe-family layers as round-capable. The label was always physically
+    # right; ASSUMED was a false flag. Any future change here is deliberate.
+    from app.parsing.sizes import resolve_route_size
+
+    route = {"polyline": [(0.0, 0.0), (300.0, 0.0)], "layer": "M-PIPE"}
+    spans = [{"text": "DN150", "x0": 10.0, "y0": 10.0, "x1": 30.0, "y1": 14.0}]
+
+    out = resolve_route_size(
+        route,
+        spans,
+        "1:100",
+        default_size={"diameter_mm": 150.0},
+    )
+    assert out["source"] == "label"
+    assert out["diameter_mm"] == 150.0
