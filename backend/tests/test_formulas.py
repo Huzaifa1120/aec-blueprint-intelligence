@@ -58,6 +58,14 @@ class TestEvaluateFormula:
             evaluate_formula("2 ** -1001", {})
         assert evaluate_formula("2 ** 10", {}) == pytest.approx(1024)
 
+    def test_pow_rejects_nested_unary_huge_exponent(self):
+        with pytest.raises(FormulaValidationError):
+            evaluate_formula("2 ** --5000", {})
+
+    def test_pow_rejects_variable_bound_huge_exponent(self):
+        with pytest.raises(FormulaValidationError):
+            evaluate_formula("base ** k", {"base": 2, "k": 999999})
+
     def test_deep_nesting_rejected(self):
         # Same-precedence operator chains parse iteratively (no parser
         # nesting cap) but build a left-leaning AST that recurses one frame

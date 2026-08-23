@@ -123,18 +123,9 @@ def _evaluate_formula(
             if isinstance(node.op, ast.Div):
                 return left / right
             if isinstance(node.op, ast.Pow):
-                exponent = node.right
-                if isinstance(exponent, ast.UnaryOp) and isinstance(
-                    exponent.op, _ALLOWED_UNARYOPS
-                ):
-                    exponent = exponent.operand
-                if (
-                    isinstance(exponent, ast.Constant)
-                    and isinstance(exponent.value, (int, float))
-                    and abs(exponent.value) > 1000
-                ):
+                if abs(right) > 1000:
                     raise FormulaValidationError(
-                        f"exponent magnitude {exponent.value} rejected (>1000)",
+                        f"exponent magnitude {right} rejected (>1000)",
                         rule_name,
                         expression,
                     )

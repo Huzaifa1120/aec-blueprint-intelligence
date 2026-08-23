@@ -66,6 +66,9 @@ def _validate_rule_data(data: Dict, source_name: str) -> List[str]:
     same conditions.
     """
     errors: List[str] = []
+    if not isinstance(data, dict):
+        errors.append(f"{source_name}: rule root must be a mapping, got {type(data).__name__}")
+        return errors
     name = data.get("name", Path(source_name).stem)
     declared = data.get("variables", []) or []
     for mat_name, entry in (data.get("bom") or {}).items():
