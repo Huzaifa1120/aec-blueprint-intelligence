@@ -7,8 +7,11 @@ state exactly where each size came from. Pure geometry/text logic — no LLM.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 SIZE_SOURCE_ORDER = ("schedule", "label", "geometry", "assumed")
 
@@ -21,7 +24,7 @@ MIN_SIDE_PT = 2.0
 
 _RECT_RE = re.compile(r"(\d{3,4})\s*[xX×]\s*(\d{3,4})")
 _DN_RE = re.compile(r"\bDN\s?(\d{2,4})\b", re.IGNORECASE)
-_DIAM_RE = re.compile(r"[ØøD]\s?(\d{2,4})\b")
+_DIAM_RE = re.compile(r"(?<![A-Za-z])[ØøD]\s?(\d{2,4})\b")
 _INCH_RE = re.compile(r'(\d{1,2})\s?(?:in\b|")', re.IGNORECASE)
 
 
@@ -77,10 +80,17 @@ def _label_near_route(label: Dict, route: Dict, proximity_pt: float) -> bool:
 
 
 def _size_matches_route_shape(size: Dict, layer: str) -> bool:
-    """A round size only fits a round-route layer and vice versa."""
+    """A round size only fits a round-route layer and vice versa.
+
+    Entries without an explicit ``shape`` key (schedule rows, defaults) are
+    classified by their dimension keys: ``diameter_mm`` = round.
+    """
     layer_upper = (layer or "").upper()
     round_layer = "RND" in layer_upper or "ROUND" in layer_upper
-    round_size = size.get("shape") == "round"
+    if "shape" in size:
+        round_size = size["shape"] == "round"
+    else:
+        round_size = "diameter_mm" in size
     return round_layer == round_size
 
 
@@ -123,8 +133,10 @@ def resolve_route_size(
 
     Returns {"width_mm","height_mm"|"diameter_mm", "source", "ref"} or None.
     """
-    # 1. Schedule table wins
+    # 1. Schedule table wins (shape-filtered: a rect row never fits a round route)
     for row in schedule_rows or []:
+        if not _size_matches_route_shape(row, route.get("layer", "")):
+            continue
         if _label_near_route(row, route, label_proximity_pt * 4):
             out = {k: v for k, v in row.items() if k != "ref"}
             out["source"] = "schedule"
@@ -135,16 +147,23 @@ def resolve_route_size(
     for span in text_spans:
         if not _label_near_route(span, route, label_proximity_pt):
             continue
-        size = parse_size_label(span.get("text", ""))
-        if size and _size_matches_route_shape(size, route.get("layer", "")):
+        text = span.get("text", "")
+        size = parse_size_label(text)
+        if size is None:
+            logger.debug(
+                "ignored malformed size label %r near %s route", text, route.get("layer")
+            )
+            continue
+        if _size_matches_route_shape(size, route.get("layer", "")):
             out = {k: v for k, v in size.items() if k != "shape"}
             out["source"] = "label"
-            out["ref"] = f"text_span:{span.get('text', '')}"
+            out["ref"] = f"text_span:{text}"
             return out
 
-    # 3. Measured geometry (double-line rectangular ducts)
+    # 3. Measured geometry (double-line rectangular ducts) — never offered
+    # to round routes, whose cross-sections are diameter-driven
     measured = measure_rect_width_mm(route, scale)
-    if measured:
+    if measured and _size_matches_route_shape(measured, route.get("layer", "")):
         out = {k: v for k, v in measured.items() if k != "shape"}
         out["source"] = "geometry"
         out["ref"] = "route_polyline_bbox"

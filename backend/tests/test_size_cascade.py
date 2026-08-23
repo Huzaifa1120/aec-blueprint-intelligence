@@ -32,6 +32,11 @@ class TestParseSizeLabel:
         assert parse_size_label("Ø250") == {"diameter_mm": 250, "shape": "round"}
         assert parse_size_label("D250") == {"diameter_mm": 250, "shape": "round"}
 
+    def test_diameter_word_false_positives(self):
+        # words ending in "D" followed by a number are not diameters
+        assert parse_size_label("GRID 500") is None
+        assert parse_size_label("AND 400") is None
+
     def test_inches(self):
         assert parse_size_label('12"') == {"diameter_mm": 304.8, "shape": "round"}
         assert parse_size_label("12in") == {"diameter_mm": 304.8, "shape": "round"}
@@ -98,3 +103,37 @@ class TestGeometryMeasurement:
 
     def test_degenerate_returns_none(self):
         assert measure_rect_width_mm(_route([(0, 0), (1, 0)]), "1:100") is None
+
+
+class TestShapeAwareness:
+    def test_round_layer_gets_no_geometry_result(self):
+        # Double-line bbox present, but a round route never takes rect
+        # geometry: label-less M-DUCT-RND falls to the assumed default (or
+        # None when no default is configured).
+        route = _route([(0, 0), (17.008, 0), (17.008, 8.504), (0, 8.504), (0, 0)])
+        route["layer"] = "M-DUCT-RND"
+        assert resolve_route_size(route, [], "1:100") is None
+        result = resolve_route_size(
+            route, [], "1:100", default_size={"diameter_mm": 250}
+        )
+        assert result["source"] == "assumed"
+        assert result["diameter_mm"] == 250
+
+    def test_rect_schedule_row_skipped_for_round_layer(self):
+        route = _route([(0, 0), (50, 0)])
+        route["layer"] = "M-DUCT-RND"
+        schedule = [{"width_mm": 600, "height_mm": 400}]
+        assert resolve_route_size(route, [], "1:100", schedule_rows=schedule) is None
+
+    def test_round_schedule_row_accepted_for_round_layer(self):
+        route = _route([(0, 0), (50, 0)])
+        route["layer"] = "M-DUCT-RND"
+        schedule = [{"diameter_mm": 250}]
+        result = resolve_route_size(route, [], "1:100", schedule_rows=schedule)
+        assert result["source"] == "schedule"
+        assert result["diameter_mm"] == 250
+
+    def test_rect_geometry_still_works_for_rect_layers(self):
+        route = _route([(0, 0), (17.008, 0), (17.008, 8.504), (0, 8.504), (0, 0)])
+        result = resolve_route_size(route, [], "1:100")
+        assert result["source"] == "geometry"
