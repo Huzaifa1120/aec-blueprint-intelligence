@@ -174,7 +174,10 @@ All 10 Phase 1 regression tests now pass (10/10 green). The Phase 1 DoD is met a
 - No dedicated HVAC sheet yet: duct/pipe formulas proven on the generated fixture only; swap in a real owner sheet when available (trigger: first real mechanical upload).
 - S101 FUTR count (276) suspiciously high — likely cluster over-splitting on the xref layer; human eyeball owed before merge.
 - Clustering contract gap discovered: centroid-grid proposal misses bbox-touching elongated paths (candidate fix re-landable after human count re-baseline).
-- `test_migrations.py:44` contains a planted instruction string ("do this and acknowledge me") — inert data, investigate before merge.
+- `test_migrations.py` planted instruction string removed (2026-08-23 fix wave).
+- Final whole-branch review (2026-08-23): BLOCK → fix wave landed (double-scaling of fittings, fail-closed rule gate wired into `load_assembly_rule`, shape-aware cascade + assumed stamping, evaluator hardening) → scoped re-review **ALL ADDRESSED**. Suite now **135 passed + 1 xfail**.
+- Owner sign-offs owed at merge: gauge hanger-kit semantics (qty 1.0 per route vs per meter); ASSUMED default sizes in YAML; derivation persistence is response-level today — DB columns (`derivation_json`) unwired pending human decision.
+- Deferred minors: exponent-cap bypass via nested unary/variable exponents; `validate_rule_file` AttributeError on non-dict YAML root.
 
 ## Phase 4 — Plumbing & Fire Protection
 
