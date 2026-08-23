@@ -1,8 +1,9 @@
 """PDF BOQ export via reportlab (spec v3 §7.14).
 
 Single landscape-A4 document: title, one table row per BOQ line with the
-same provenance columns as the XLSX writer, then a verbatim totals block.
-Unpriced lines carry the review-required label instead of a price.
+same provenance columns as the XLSX writer (material, quantity, unit,
+confidence_status, size_source, unpriced flag), then a verbatim totals
+block. Unpriced lines carry the review-required label instead of a price.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from app.exports import UNPRICED_LABEL
 HEADERS = [
     "Material",
     "Quantity",
+    "Unit",
     "Unit Cost",
     "Total Cost",
     "Unpriced",
@@ -34,7 +36,7 @@ HEADERS = [
 ]
 
 # Sum ≈ 710pt against ~752pt usable width on landscape A4 with 15mm margins.
-_COL_WIDTHS = [220, 55, 80, 110, 60, 95, 90]
+_COL_WIDTHS = [210, 50, 35, 80, 105, 55, 95, 80]
 _GREY = colors.Color(0.85, 0.85, 0.85)
 
 
@@ -57,9 +59,11 @@ def _line_cells(line: dict) -> list[str]:
         unit_cost = _format_number(line.get("unit_cost"))
         total_cost = _format_number(line.get("total_cost"))
     size_source = line.get("size_source")
+    unit = line.get("unit")
     return [
         str(line.get("material_name")),
         _format_number(line.get("quantity")),
+        "" if unit is None else str(unit),
         str(unit_cost),
         str(total_cost),
         "YES" if unpriced else "NO",

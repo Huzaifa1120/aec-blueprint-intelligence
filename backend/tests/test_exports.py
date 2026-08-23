@@ -39,6 +39,7 @@ from app.exports.xlsx_export import render as render_xlsx
 HEADERS = [
     "Material",
     "Quantity",
+    "Unit",
     "Unit Cost",
     "Total Cost",
     "Unpriced",
@@ -49,6 +50,7 @@ HEADERS = [
 REQUIRED_LINE_FIELDS = {
     "material_name",
     "quantity",
+    "unit",
     "confidence_status",
     "size_source",
     "unpriced",
@@ -76,6 +78,7 @@ def _payload() -> dict:
                 "confidence_status": "MEASURED",
                 "material_name": "Rectangular duct",
                 "quantity": 12.5,
+                "unit": "m",
                 "unit_cost": 7.0,
                 "total_cost": 87.5,
                 "unpriced": False,
@@ -86,6 +89,7 @@ def _payload() -> dict:
             {
                 "material_name": "Duct sealant",
                 "quantity": 3.0,
+                "unit": "m",
                 "unit_cost": 2.5,
                 "total_cost": 7.5,
                 "unpriced": False,
@@ -95,6 +99,7 @@ def _payload() -> dict:
             {
                 "material_name": "Mystery bracket",
                 "quantity": 4.0,
+                "unit": "ea",
                 "unit_cost": 0.0,
                 "total_cost": 0.0,
                 "unpriced": True,
@@ -143,24 +148,26 @@ def test_xlsx_header_and_cell_equality():
     route_row = grid[1]
     assert route_row[0] == "Rectangular duct"
     assert route_row[1] == 12.5
-    assert route_row[2] == 7.0
-    assert route_row[3] == 87.5
-    assert route_row[4] is False
-    assert route_row[5] == "MEASURED"
-    assert route_row[6] == "schedule"
+    assert route_row[2] == "m"
+    assert route_row[3] == 7.0
+    assert route_row[4] == 87.5
+    assert route_row[5] is False
+    assert route_row[6] == "MEASURED"
+    assert route_row[7] == "schedule"
     material_row = grid[2]
     assert material_row[0] == "Duct sealant"
     assert material_row[1] == 3.0
-    assert material_row[2] == 2.5
-    assert material_row[3] == 7.5
-    assert material_row[4] is False
-    assert material_row[5] == "MEASURED"
-    assert material_row[6] is None
+    assert material_row[2] == "m"
+    assert material_row[3] == 2.5
+    assert material_row[4] == 7.5
+    assert material_row[5] is False
+    assert material_row[6] == "MEASURED"
+    assert material_row[7] is None
 
 
 def test_xlsx_totals_block_verbatim():
     grid = _xlsx_grid(_payload())
-    labels_to_values = {row[0]: row[3] for row in grid if row and row[0]}
+    labels_to_values = {row[0]: row[4] for row in grid if row and row[0]}
     assert labels_to_values["Materials Total"] == 95.0
     assert labels_to_values["Labor Total"] == 42.0
     assert labels_to_values["Grand Total"] == 137.0
@@ -172,19 +179,24 @@ def test_xlsx_every_line_carries_required_columns():
     for row in item_rows:
         assert row[0], f"missing material on row {row}"
         assert isinstance(row[1], (int, float)), f"missing quantity on row {row}"
-        assert row[5], f"missing confidence_status on row {row}"
+        assert row[2], f"missing unit on row {row}"
+        assert row[6], f"missing confidence_status on row {row}"
         headers_lower = [h.lower().replace(" ", "_") for h in HEADERS]
-        assert "size_source" in headers_lower and "unpriced" in headers_lower
+        assert (
+            "unit" in headers_lower
+            and "size_source" in headers_lower
+            and "unpriced" in headers_lower
+        )
 
 
 def test_xlsx_unpriced_flagged_never_zero():
     grid = _xlsx_grid(_payload())
-    unpriced_rows = [row for row in grid if row and row[4] is True]
+    unpriced_rows = [row for row in grid if row and row[5] is True]
     assert len(unpriced_rows) == 1
     row = unpriced_rows[0]
     assert row[0] == "Mystery bracket"
-    assert row[2] == UNPRICED_LABEL
     assert row[3] == UNPRICED_LABEL
+    assert row[4] == UNPRICED_LABEL
     for value in row:
         assert value != 0, "unpriced line must never render as $0"
 
@@ -346,10 +358,10 @@ def test_endpoint_xlsx_export_is_valid_workbook(api):
     wb = load_workbook(io.BytesIO(resp.content))
     grid = [[cell.value for cell in row] for row in wb.active.iter_rows()]
     assert grid[0] == HEADERS
-    unpriced = [row for row in grid if row and row[4] is True]
+    unpriced = [row for row in grid if row and row[5] is True]
     assert len(unpriced) == 1
     assert unpriced[0][0] == "mystery_bracket"
-    assert unpriced[0][3] == UNPRICED_LABEL
+    assert unpriced[0][4] == UNPRICED_LABEL
 
 
 def test_endpoint_pdf_export_has_pdf_magic(api):

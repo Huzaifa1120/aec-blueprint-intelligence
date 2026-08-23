@@ -113,6 +113,10 @@ def _derivation_payload(
     """Build the replayable derivation record for one material line."""
     derivation = material.get("derivation") or {}
     payload: dict = {"material_name": material["material_name"]}
+    # spec v3 §4.8: exported lines carry material/quantity/unit — stash the
+    # rule-inferred unit so payload/exports can surface it (fix-wave F3).
+    if material.get("unit"):
+        payload["unit"] = material["unit"]
     if "formula" in derivation:
         entry = (rule_bom or {}).get(material["material_name"])
         waste = rule_waste_default

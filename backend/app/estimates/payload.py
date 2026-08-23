@@ -51,6 +51,9 @@ def payload_from_estimate(estimate: Estimate) -> dict:
         entry: dict = {
             "material_name": material_name(derivation, measurement),
             "quantity": item.quantity,
+            # Unit of measure from the assembly rule (spec v3 §4.8); None for
+            # legacy rows persisted before the unit was stashed.
+            "unit": derivation.get("unit"),
             "unit_cost": item.unit_cost,
             # None when unpriced: the flag, never a fabricated $0, is truth.
             "unit_price": None if unpriced else item.unit_cost,

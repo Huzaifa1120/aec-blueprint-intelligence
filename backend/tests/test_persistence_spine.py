@@ -206,3 +206,35 @@ def test_replay_covers_legacy_linear_scaling():
     body = r.json()
     assert body["checked"] >= 3  # conduit_pipe, conduit_fitting, clamp
     assert body["mismatches"] == []
+
+
+def test_boq_derivation_json_carries_unit():
+    """Fix-wave F3: every persisted BOQ line stashes its unit of measure.
+
+    spec v3 §4.8 requires material/quantity/unit on exported lines; the
+    unit inferred by apply_assembly must survive into BoqItem.derivation_json
+    so payload/exports can surface it.
+    """
+    extraction = SheetExtraction(
+        sheet_name="TEST-SHEET-UNIT",
+        page_number=1,
+        scale="1:100",
+        layers=[LayerRow("M-DUCT", "mechanical")],
+        routes=[
+            RouteRow(
+                "duct_rectangular",
+                "M-DUCT",
+                10.0,
+                size_json={"width_mm": 600, "height_mm": 400, "source": "label"},
+            )
+        ],
+    )
+    from app.db.models.estimate import BoqItem
+
+    with OrmSession(get_engine()) as db:
+        est = persist_extraction(db, None, extraction)
+        items = db.query(BoqItem).filter_by(estimate_id=est).all()
+    assert items, "expected BOQ rows for the duct route"
+    for item in items:
+        payload = json.loads(item.derivation_json)
+        assert payload.get("unit"), f"missing unit in derivation_json: {payload}"
