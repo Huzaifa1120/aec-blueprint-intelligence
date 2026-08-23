@@ -115,11 +115,11 @@ Single serial task (owns `e2e/router.py`, `e2e/persistence.py`, `main.py` after 
 
 ### 4.10 Human-gated task (G9)
 
-Clustering bbox-touching fix: implemented behind a flag, executed only after the owner re-baselines counts (lighting 26 vs 23 ruling). Not part of any wave's exit criteria.
+Clustering bbox-touching fix: scoped and execution-gated only — no implementation merged. Execution is blocked on the owner's lighting count re-baseline ruling (26 vs 23). Not part of any wave's exit criteria.
 
 ## 5. Data flow
 
-Run → classify (quality gate, unchanged) → parse → scale → routes/components/sizes (unchanged math) → builders enrich (layers/blocks/annotations/unmapped) → respond (+persist when asked) → estimates API serves/replays → exports render → narrator narrates. All numbers trace: response row ⇄ BoqItem.derivation_json ⇄ Measurement.raw_value ⇄ vector path ids.
+Run → classify (quality gate, unchanged) → parse → scale → routes/components/sizes (unchanged math) → builders enrich (layers/blocks/annotations/unmapped) → respond (+persist when asked) → estimates API serves/replays → exports render → narrator narrates. All numbers trace: response row ⇄ BoqItem.derivation_json ⇄ Measurement.raw_value ⇄ Component/Route rows (vector path-id JSON deferred to the next schema migration).
 
 ## 6. Error handling
 
@@ -146,7 +146,7 @@ Run → classify (quality gate, unchanged) → parse → scale → routes/compon
 | D5 | Replay mismatch = HTTP 409 hard failure | §2 guiding principle: determinism is the product; silent drift would violate it |
 | D6 | Hanger kits remain qty 1.0/route until owner rules otherwise | Current shipped semantics; changing without ruling would silently move BOQ numbers |
 | D7 | ASSUMED default sizes stay as-is, always stamped `size_source="assumed"` | Owner confirmation still owed; honest provenance meanwhile |
-| D8 | Clustering bbox-fix implemented-but-flagged, not merged to behavior | Re-baselines human-approved counts (lighting 26→23 question); owner ruling owed |
+| D8 | Clustering bbox-fix scoped + execution-gated; no implementation merged | Re-baselines human-approved counts (lighting 26→23 question); owner ruling owed before any code lands |
 | D9 | UNMAPPED items persist + surface; never priced | §7.9 verbatim; pricing an unmapped element would fabricate scope |
 
 ## 9. Human gates outstanding (not code)
