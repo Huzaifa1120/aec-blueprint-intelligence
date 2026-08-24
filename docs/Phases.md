@@ -204,10 +204,32 @@ Closes every code-addressable Phase 3 leftover and builds the spec-v3 components
 4. ASSUMED default duct/pipe sizes in `data/assemblies/*.yaml` confirmation.
 5. Real HVAC sheet supply (fixture swap trigger).
 
-## Phase 4 — Plumbing & Fire Protection
+## Phase 4 — Plumbing & Fire Protection 🟦 *(in progress — DoD completes on human confirmation of the YAML values below + first real sheet)*
 
 - Same patterns; fire-alarm layer handling (exists on the sample sheet: `FIRE ALARM`).
 - **DoD:** plumbing & fire sheets processed.
+- Design spec: `docs/superpowers/specs/2026-08-24-phase-4-plumbing-fire-protection-design.md`; implementation plan: `docs/superpowers/plans/2026-08-24-phase-4-plumbing-fire-protection.md`.
+
+### 4.1 What's implemented (2026-08-24, branch `feature/phase-4-plumbing-fire-protection`)
+
+- **Layer classification disciplines:** plumbing / fire_protection / fire_alarm added to the human-editable registry (`data/layer_classification.yaml`) — e.g. `M_SAUDI_RAIN DOWNPIPE` → plumbing, `FP-SPRK-*` → fire_protection, `FA-*` and `FIRE ALARM` → fire_alarm; electrical/mechanical classifications untouched.
+- **Geometry-derived fittings** (`app/parsing/fittings.py`, new): 90° elbows at true polyline corners; tees where a sibling route's vertex lands on this route's interior (sibling-route junction wiring in `resolve_route_context`); chained-segment join-point duplicates collapsed so corners never degrade to zero-length segments; degenerate (zero-extent) clusters produce no route instead of ghost BOQ rows.
+- **Stroke-dedup correctness fix:** pymupdf ≥1.28 emits every stroked segment forward AND reversed, so route polylines double-traversed each stroke (lengths ≈3× drawn truth). The exact-reversal dedup in `extract_polyline_from_items` fixes lengths at the source; the consequent `SHAPE_EMISSION_FACTOR` rebase 3.0→1.0 in `test_phase3_regression` moves sheet_metal_m2 Σ 146.28→48.76 m² — which equals the drawn truth (the old number was triple-counted input, not a mechanical regression).
+- **Fixture-unit sizing** (`app/parsing/fixture_units.py`, new): deterministic accumulation of YAML-declared fixture units for components within a corridor of a water-supply polyline; total resolves a nominal diameter through the owner-editable code table. New `fixture_units` cascade tier sits between schedule and label tiers (`app/parsing/sizes.py`); provenance `{diameter_mm, fu_total, ref:[type@key,...], source:"fixture_units"}` rides `Route.size_json`.
+- **Rules data:** 18 new assembly YAMLs under `data/assemblies/` (sanitary_drainage, water_supply, vent, sprinkler_branch, sprinkler_head, standpipe, storm_downpipe, hose_cabinet, cleanout, floor_drain, wc, lavatory, sink, water_heater, smoke_detector, call_point, sounder, facp) incl. `water_supply.fixture_unit_gauge`; `load_assembly_rule` passes through `fixture_units` and `fixture_unit_gauge`; typed fixture symbol layers `P-FIX-WC` / `P-FIX-LAV` keep symbols off route geometry paths.
+- **E2E branch:** canonical route-layer set via the shared `ROUTE_ASSEMBLIES` import (no parallel list); plumbing/fire routes quantified with fittings + FU sizes; deterministic generated fixture (`tests/fixtures/make_plumbing_fire_fixture.py`, production code never references it).
+- **Replay coherence verification** (`app/estimates/router.py`): `/api/estimates/{id}/replay` additionally verifies every `fixture_units`-sourced route reachable via BoqItem → Measurement.route — gauge(fu_total) must re-resolve diameter_mm, ref tokens must exist in the rule YAML and sum to fu_total; present-but-corrupt size_json fails honest (mirrors the derivation F2 rule).
+
+**Spec refinements locked by the plan (verbatim from its Global Constraints):**
+
+> 1. `storm_downpipe` is implemented as a **counted device kit**, not a sized route — vertical riser length is physically unmeasurable from a floor plan, so per-meter formulas would be fiction. Sized-route treatment arrives with real riser-diagram sheets (same swap trigger as spec §9).
+> 2. Replay parity for `fixture_units` sizes verifies **derivation coherence** (gauge(fu_total) == diameter_mm; `fu_breakdown` sums == fu_total; breakdown values match rule YAML) rather than geometric recomputation — route polylines are not persisted (known Phase 3.5 deferred gap, `path_ids_json` family). Fail-closed intent preserved.
+
+**Validation:** fixture e2e green end-to-end (counts, waste factors, elbow/tee truths to drawn geometry); MMC downpipe pin = **11** (owner ruling 2026-08-24: 44 paths merge into exactly 11 symbol clusters, probe-confirmed twice — determinism proof recorded in the test comment); FIRE ALARM empty-OCG honest zero (layer persists as `fire_alarm`, no devices invented); replay tamper case — a DB-flipped `fu_total` flips replay to 409 while the clean run stays green.
+
+**Human-confirm gate outstanding:** fixture-unit values (wc 3 / lavatory 1 / sink 2), water-supply gauge thresholds, ASSUMED default sizes — owner-editable YAML pending ruling. Device rates already owner-confirmed ($38/h + 0.05 waste plumbing; $45/h + 0.02 waste fire protection + fire alarm).
+
+**Real-sheet swap trigger:** plumbing/fire proofs run against the generated fixture until the owner supplies a real plumbing or fire-protection sheet (no dedicated HVAC/duct sheet exists either); swap in the real sheet and re-pin expectations when available.
 
 ## Phase 5 — Architectural
 

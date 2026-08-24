@@ -21,9 +21,16 @@
     ``max_mm`` are recomputed. A corrupt or non-dict ``derivation_json``
     fails honest as a mismatch — it can never hide as "unchecked".
 
+    Phase 4 additionally verifies every ``fixture_units``-sourced route on
+    the estimate for derivation coherence (Global Constraint refinement 2):
+    the gauge table re-resolves ``fu_total`` to the recorded ``diameter_mm``,
+    and the ``ref`` breakdown tokens must exist in the rule YAML and sum to
+    the recorded total. Corrupt provenance fails honest; a tampered database
+    can never replay clean.
+
     200 ``{checked, mismatches: []}`` when every checked item reproduces;
-    409 ``{detail, mismatches: [boq_item_id, ...]}`` listing offenders when
-    any recomputation diverges. A tampered database can never replay clean.
+    409 ``{detail, mismatches: [boq_item_id | route:id, ...]}`` listing
+    offenders when any recomputation diverges.
 """
 
 from __future__ import annotations
@@ -45,6 +52,10 @@ from app.assembly.rules import load_assembly_rule
 from app.db.models.estimate import BoqItem, Estimate
 from app.db.session import get_db
 from app.estimates.payload import payload_from_estimate
+from app.parsing.fixture_units import (
+    fixture_units_for_type,
+    resolve_size_from_fixture_units,
+)
 
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
 
@@ -70,6 +81,46 @@ def _load_derivation(raw: str | None) -> tuple[dict | None, bool]:
     if not isinstance(value, dict):
         return None, True
     return value, False
+
+
+def _load_size_json(raw: str | None) -> dict | None:
+    """Parse a persisted Route.size_json; None when absent/unparseable."""
+    try:
+        return json.loads(raw) if raw else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _verify_fu_size(size: dict) -> bool:
+    """Derivation coherence for one fixture_units-sourced route size.
+
+    The gauge table must re-resolve the recorded fu_total to the recorded
+    diameter_mm, and every ``type@key`` ref token's rule YAML fixture units
+    must exist and sum to the recorded total (T7 writes both from the same
+    accumulation, so a divergence means tampering or YAML drift).
+    """
+    gauge = (load_assembly_rule("water_supply") or {}).get("fixture_unit_gauge") or {}
+    try:
+        fu_total = float(size["fu_total"])
+        diameter = float(size["diameter_mm"])
+        breakdown = size["ref"]
+    except (KeyError, TypeError, ValueError):
+        return False
+    if not isinstance(breakdown, list) or not breakdown:
+        return False  # an FU-resolved size with no contributing fixtures is incoherent
+    resolved = resolve_size_from_fixture_units(fu_total, gauge.get("rows") or {})
+    if not resolved or abs(resolved["diameter_mm"] - diameter) > 1e-9:
+        return False
+    # Breakdown coherence: each "type@key" ref's rule YAML FU must exist,
+    # and the recorded FUs must sum to the recorded total.
+    total = 0.0
+    for token in breakdown:
+        ctype = str(token).split("@", 1)[0]
+        fu = fixture_units_for_type(ctype)
+        if fu <= 0.0:
+            return False
+        total += fu
+    return abs(total - fu_total) <= 1e-6
 
 
 @router.get("/{estimate_id}/boq", summary="Persisted BOQ rows for an estimate")
@@ -185,6 +236,27 @@ def replay_estimate(
         checked += 1
         if not _replay_item(item, derivation):
             mismatches.append(str(item.id))
+
+    # Phase 4: fixture_units-sourced route sizes must stay coherent with
+    # their recorded FU totals, breakdown refs, and the rule's gauge table.
+    seen_route_ids: set[uuid.UUID] = set()
+    for item in estimate.boq_items:
+        route_row = getattr(getattr(item, "measurement", None), "route", None)
+        if route_row is None or route_row.id in seen_route_ids:
+            continue
+        seen_route_ids.add(route_row.id)
+        raw_size = route_row.size_json
+        size = _load_size_json(raw_size)
+        if raw_size and not isinstance(size, dict):
+            # Present-but-corrupt provenance fails honest (mirrors the F2 rule).
+            checked += 1
+            mismatches.append(f"route:{route_row.id}")
+            continue
+        if not isinstance(size, dict) or size.get("source") != "fixture_units":
+            continue
+        checked += 1
+        if not _verify_fu_size(size):
+            mismatches.append(f"route:{route_row.id}")
 
     if mismatches:
         return JSONResponse(
