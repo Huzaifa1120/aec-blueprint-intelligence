@@ -6,7 +6,66 @@ If scale cannot be determined, the job is marked needs_review; never fabricated.
 """
 
 import re
-from typing import List, Dict, Any
+from dataclasses import dataclass
+from typing import List, Dict, Any, Tuple
+
+
+@dataclass(frozen=True)
+class ScaleResult:
+    scale_str: str
+    denominator: float
+    status: str  # "detected" | "assumed"
+
+
+# Architectural inch scales -> denominator (feet per inch * 12 * ratio inverse)
+_ARCH_DENOMINATORS = {
+    "1/2": 24.0,
+    "3/4": 16.0,
+    "1": 12.0,
+    "3/32": 128.0,
+    "1/8": 96.0,
+    "3/16": 64.0,
+    "1/4": 48.0,
+    "3/8": 32.0,
+}
+
+
+def resolve_scale(text_spans: List[Dict[str, Any]]) -> ScaleResult:
+    """Read the scale from sheet text; NEVER silently invent one.
+
+    Returns status="detected" with the matched scale, or status="assumed"
+    with 1:100 when nothing parseable exists — callers must surface the
+    assumed state (spec v3 §7.4: scale is never assumed globally).
+    """
+    for span in text_spans:
+        text = span.get("text", "") or ""
+        if not text:
+            continue
+        m = re.search(r"\bELECTRICAL\.SCALE\s+(1:\d+)\b", text) or re.search(
+            r"\bSCALE\s+1=(\d+)'\''-0\"\b", text
+        )
+        if m:
+            return _from_ratio(m.group(1))
+        arch = re.search(r'\b(\d+/\d+|\d+)"\s*=\s*1\'\s*-?\s*0?"?', text)
+        if arch and arch.group(1) in _ARCH_DENOMINATORS:
+            denom = _ARCH_DENOMINATORS[arch.group(1)]
+            return ScaleResult(f'{arch.group(1)}"=1\'-0"', denom, "detected")
+        m = re.search(r"\b(1:\d+)\b", text)
+        if m:
+            return _from_ratio(m.group(1))
+    return ScaleResult("1:100", 100.0, "assumed")
+
+
+def _from_ratio(ratio: str) -> ScaleResult:
+    denom = float(ratio.split(":")[1])
+    return ScaleResult(ratio, denom, "detected")
+
+
+def parse_scale_denominator(scale_str: str) -> Tuple[float, bool]:
+    try:
+        return float(str(scale_str).split(":")[1]), True
+    except (IndexError, ValueError, AttributeError):
+        return 100.0, False
 
 
 # ---------------------------------------------------------------------------
