@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     degraded_confidence_multiplier: float = 0.8
     review_time_target_min: float = 10.0
 
+    fitting_bend_angle_deg: float = 30.0
+    fitting_min_segment_pt: float = 2.0
+    fitting_junction_tol_pt: float = 6.0
+    fu_corridor_pt: float = 24.0
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def split_cors(cls, v: object) -> object:

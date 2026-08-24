@@ -1,0 +1,10 @@
+name: sprinkler_head
+rule_version: "1.0.0"
+bom:
+  sprinkler_head: 1
+  flexible_drops: 0
+labor:
+  installation_hours: 0.5
+  hourly_rate: 45.00
+  category: fire_protection
+waste_factor: 0.02

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ForeignKey, String, Uuid
+from sqlalchemy import ForeignKey, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -39,7 +39,7 @@ class Route(Base):
     confidence_score: Mapped[float] = mapped_column(default=1.0)
     layer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("layers.id"))
     source_quality: Mapped[str] = mapped_column(String(20), default="layered_vector")
-    size_json: Mapped[str | None] = mapped_column(String(1000), default=None)
+    size_json: Mapped[str | None] = mapped_column(Text, default=None)
     # JSON text: {width_mm,height_mm|diameter_mm,source,ref}
 
     sheet: Mapped["Sheet"] = relationship(back_populates="routes")

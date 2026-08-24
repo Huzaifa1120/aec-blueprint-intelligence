@@ -35,12 +35,13 @@ import logging
 import os
 import tempfile
 import uuid
-from typing import List, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import pymupdf  # MUST import pymupdf, never fitz
 from fastapi import APIRouter, File, UploadFile
 from sqlalchemy.orm import Session as OrmSession
 
+from app.core.config import get_settings
 from app.db.session import get_engine
 from app.e2e.extraction import (
     ROUTE_ASSEMBLIES,
@@ -54,7 +55,7 @@ from app.ingestion.router import classify_upload
 from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, _scale_denominator, parse_pdf
 from app.parsing.scale import detect_scale
 from app.parsing.clustering import cluster_paths_threshold, derive_threshold_px
-from app.parsing.layer_registry import classify_layers
+from app.parsing.layer_registry import classify_layers, discipline_of
 from app.parsing.routes import measure_routes
 from app.parsing.schedules import detect_blocks
 from app.parsing.sizes import detect_schedule_rows, resolve_route_size
@@ -64,6 +65,9 @@ from app.parsing.text_walker import associate_text, probe_span_ocgs
 from app.assembly.formulas import FormulaValidationError
 from app.assembly.rules import apply_assembly, load_assembly_rule
 from app.catalog.prices import compute_boq_item
+
+if TYPE_CHECKING:
+    from app.core.config import Settings
 
 
 logger = logging.getLogger(__name__)
@@ -276,6 +280,108 @@ def _aggregate_unmapped(components: List[Dict]) -> List[Dict]:
     return [aggregated[layer] for layer in order]
 
 
+def resolve_route_context(
+    assembly_type: str,
+    route: Dict,
+    cascade_spans: List[Dict],
+    scale: str,
+    schedule_rows: List[Dict],
+    components: List[Dict],
+    all_routes: List[Dict],
+    route_index: int,
+    *,
+    settings: "Settings",
+) -> Optional[Tuple[Dict, Optional[str], Optional[Dict]]]:
+    """Cascade + fittings + FU for one sized route.
+
+    Returns (variables, size_source, size) or None if the route must be
+    dropped (fail-honest). `size` is the raw cascade dict including any
+    fu_total/ref provenance keys. Sibling routes feed junction (tee)
+    detection: a foreign vertex landing on this route's interior is a tee.
+    """
+    from app.parsing.fittings import derive_fittings
+    from app.parsing.fixture_units import accumulate_fixture_units, resolve_size_from_fixture_units
+
+    mech_rule = load_assembly_rule(assembly_type) or {}
+    fu_size = None
+    if assembly_type == "water_supply":
+        polyline = [(float(x), float(y)) for x, y in route.get("polyline") or []]
+        # Adapt extraction rows (assembly_type/x/y + positional key) at the
+        # boundary — never mutate the extraction dicts themselves.
+        fu_comps = [
+            {
+                "key": f"{idx}@{c.get('source_path_ids', [''])[0] or idx}",
+                "component_type": c.get("assembly_type"),
+                "x": float(c.get("x", 0.0)),
+                "y": float(c.get("y", 0.0)),
+            }
+            for idx, c in enumerate(components)
+            if c.get("assembly_type")
+        ]
+        fu_total, breakdown = accumulate_fixture_units(
+            polyline, fu_comps, corridor_pt=settings.fu_corridor_pt
+        )
+        gauge = mech_rule.get("fixture_unit_gauge") or {}
+        if fu_total > 0.0 and gauge:
+            size = resolve_size_from_fixture_units(fu_total, gauge.get("rows") or {})
+            if size:
+                fu_size = {
+                    **size,
+                    "fu_total": fu_total,
+                    "ref": [f"{b['component_type']}@{b['key']}" for b in breakdown],
+                }
+
+    size = resolve_route_size(
+        route,
+        cascade_spans,
+        scale,
+        schedule_rows=schedule_rows,
+        default_size=mech_rule.get("defaults") or None,
+        fixture_unit_size=fu_size,
+    )
+    if size is None:
+        return None
+    size_source = size.get("source")
+    required_size_vars = set(mech_rule.get("variables") or []) - {
+        "length_m", "max_mm", "elbows_90", "tees",
+    }
+    if any(var not in size for var in required_size_vars):
+        size_source = "assumed"
+
+    # Tee candidates must classify into the SAME discipline as the target
+    # route (spec §4): an electrical tray crossing a water pipe is a visual
+    # overlap, never a junction. Elbows derive from the route's own polyline
+    # and are unaffected by the filter.
+    target_discipline = discipline_of(str(route.get("layer") or ""))
+    fittings = derive_fittings(
+        route,
+        [
+            r
+            for i, r in enumerate(all_routes)
+            if i != route_index and discipline_of(str(r.get("layer") or "")) == target_discipline
+        ],
+        bend_angle_deg=settings.fitting_bend_angle_deg,
+        min_segment_pt=settings.fitting_min_segment_pt,
+        junction_tol_pt=settings.fitting_junction_tol_pt,
+    )
+    variables = {
+        "length_m": route["length_m"],
+        "elbows_90": float(fittings["elbows_90"]),
+        "tees": float(fittings["tees"]),
+        **{k: v for k, v in size.items() if k in ("width_mm", "height_mm", "diameter_mm")},
+    }
+    # Persisted-route parity: only stamp fitting counts onto the size dict
+    # when the rule actually declares them (mechanical rules don't — their
+    # size_json stays byte-compatible).
+    if {"elbows_90", "tees"} <= set(mech_rule.get("variables") or []):
+        size = {
+            **size,
+            "elbows_90": float(fittings["elbows_90"]),
+            "tees": float(fittings["tees"]),
+        }
+    return variables, size_source, size
+
+
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
@@ -363,43 +469,22 @@ def e2e_run(
                 variables = None
                 size_source = None
                 if assembly_type in SIZED_ASSEMBLIES:
-                    mech_rule = load_assembly_rule(assembly_type) or {}
-                    size = resolve_route_size(
-                        route,
-                        cascade_spans,
-                        scale,
-                        schedule_rows=schedule_rows,
-                        default_size=mech_rule.get("defaults") or None,
+                    ctx = resolve_route_context(
+                        assembly_type, route, cascade_spans, scale,
+                        schedule_rows, extraction_components, routes,
+                        route_index, settings=get_settings(),
                     )
-                    if size is None:
+                    if ctx is None:
                         logger.warning(
                             "dropping %s route (%.3f m): no resolvable "
                             "cross-section size and no configured default",
-                            assembly_type,
-                            route["length_m"],
+                            assembly_type, route["length_m"],
                         )
                         continue
-                    size_source = size.get("source")
-                    # A cascade source above 'assumed' only holds if the
-                    # resolved size actually covers the rule's required size
-                    # variables; when defaults filled the gap the row must be
-                    # labelled ASSUMED (fail-honest provenance, spec §4).
-                    required_size_vars = set(mech_rule.get("variables") or []) - {
-                        "length_m",
-                        "max_mm",
-                    }
-                    if any(var not in size for var in required_size_vars):
-                        size_source = "assumed"
-                    # Persist the EFFECTIVE tier, not the raw cascade hit:
-                    # Route.size_json must carry the same ASSUMED downgrade
-                    # the response math used (fix-wave F2).
-                    route_sizes[route_index] = {**size, "source": size_source}
-                    variables = {"length_m": route["length_m"], **{
-                        k: v for k, v in size.items()
-                        if k in ("width_mm", "height_mm", "diameter_mm")
-                    }}
-                    # max_mm is derived inside rules.py from the bound
-                    # width/height/diameter — no manual duplication here.
+                    variables, size_source, resolved_size = ctx
+                    # Persist the EFFECTIVE tier exactly as before the
+                    # refactor; FU provenance rides along inside size.
+                    route_sizes[route_index] = {**resolved_size, "source": size_source}
 
                 # Fail-closed like persistence: one broken rule drops that
                 # route with a warning — it must never 500 the whole run

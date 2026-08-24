@@ -1,0 +1,11 @@
+name: hose_cabinet
+rule_version: "1.0.0"
+bom:
+  hose_cabinet: 1
+  landing_valve: 1
+  hose_30m: 1
+labor:
+  installation_hours: 2.5
+  hourly_rate: 45.00
+  category: fire_protection
+waste_factor: 0.02

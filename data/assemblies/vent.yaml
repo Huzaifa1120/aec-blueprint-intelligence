@@ -1,0 +1,17 @@
+name: vent
+rule_version: "1.0.0"
+variables: [length_m, diameter_mm, elbows_90, tees]
+defaults:
+  diameter_mm: 50
+bom:
+  vent_pipe_m:
+    formula: "length_m"
+    waste_factor: 0.05
+  bend_90_elbow:
+    formula: "elbows_90 * 1.05"
+    waste_factor: 0.0
+labor:
+  installation_hours: 0.8
+  hourly_rate: 40.00
+  category: plumbing
+waste_factor: 0.10

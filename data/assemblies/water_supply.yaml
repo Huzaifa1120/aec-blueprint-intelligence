@@ -1,0 +1,25 @@
+name: water_supply
+rule_version: "1.0.0"
+variables: [length_m, diameter_mm, elbows_90, tees]
+defaults:
+  diameter_mm: 25
+bom:
+  supply_pipe_m:
+    formula: "length_m"
+    waste_factor: 0.05
+  elbow_fitting:
+    formula: "elbows_90"
+    waste_factor: 0.0
+  tee_fitting:
+    formula: "tees"
+    waste_factor: 0.0
+  pipe_bracket: 0.8
+labor:
+  installation_hours: 1.0
+  hourly_rate: 40.00
+  category: plumbing
+waste_factor: 0.10
+# Owner-editable code table: accumulated fixture units -> nominal diameter_mm.
+fixture_unit_gauge:
+  by: fu_total
+  rows: {"16": "25", "60": "32", "120": "40", "250": "50", "500": "65", "900": "80"}

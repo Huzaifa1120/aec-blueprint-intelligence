@@ -33,6 +33,10 @@ APPROVED_REBASELINE_COUNTS = {
     "access_control_door": 2,
     "cable_tray": 1,
     "lighting_outlet": 26,
+    # New layer mapping approved by owner 2026-08-24 (Phase 4 T5); per-layer
+    # clustering behavior untouched — 11 downpipe symbols on the MMC sheet are
+    # genuinely counted under the new storm_downpipe mapping.
+    "storm_downpipe": 11,
 }
 
 

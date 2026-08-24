@@ -39,8 +39,6 @@ from app.parsing.layer_map import layer_to_assembly
 
 logger = logging.getLogger(__name__)
 
-_SIZE_VARIABLES = ("width_mm", "height_mm", "diameter_mm")
-
 
 def _resolve_project(db: OrmSession, project_id: uuid.UUID | None) -> Project:
     if project_id is not None:
@@ -100,7 +98,12 @@ def _replace_sheet(db: OrmSession, sheet: Sheet) -> Drawing:
 
 def _size_variables(size_json: dict | None) -> dict[str, float]:
     size = size_json or {}
-    return {key: float(size[key]) for key in _SIZE_VARIABLES if key in size}
+    out = {
+        k: float(size[k])
+        for k in ("width_mm", "height_mm", "diameter_mm", "elbows_90", "tees")
+        if k in size
+    }
+    return out
 
 
 def _derivation_payload(

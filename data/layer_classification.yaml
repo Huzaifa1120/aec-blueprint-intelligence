@@ -7,14 +7,25 @@
 # Trap compliance: rules are data-driven (YAML), never hardcoded in source.
 # Adding a discipline or a new layer naming convention is an edit to THIS
 # FILE ONLY — never code.
+# Disciplines now include plumbing / fire_protection / fire_alarm (Phase 4).
 layer_classification_rules:
   - pattern: '^(M_SAUDI_(WALL|DOOR|STAIRS|ROOM|AREAS)|M-PART-GLZW)'
     discipline: architectural
-  - pattern: '^(E-|ADO |FIRE ALARM|NORMAL TRAY|access control)'
+  - pattern: '^FIRE ALARM'
+    discipline: fire_alarm
+  - pattern: '^(E-|ADO |NORMAL TRAY|access control)'
     discipline: electrical
   - pattern: '^(M-DUCT|M-PIPE|M-EQPT)'
     discipline: mechanical
-  - pattern: '^M_SAUDI_(WATER_INSULATING|VENT_identy|RAIN)'
+  - pattern: '^(P-)'
+    discipline: plumbing
+  - pattern: '^(FP-)'
+    discipline: fire_protection
+  - pattern: '^(FA-)'
+    discipline: fire_alarm
+  - pattern: '^M_SAUDI_RAIN DOWNPIPE'
+    discipline: plumbing
+  - pattern: '^M_SAUDI_(WATER_INSULATING|VENT_identy)'
     discipline: envelope
   - pattern: '^M_SAUDI_(MAT|METAL|PATT|NPLT|PRPT|AGRAF|DOT|ACCESSORY|HIDDEN)'
     discipline: material_rendering   # non-structural

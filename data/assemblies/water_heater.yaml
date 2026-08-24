@@ -1,0 +1,11 @@
+name: water_heater
+rule_version: "1.0.0"
+bom:
+  water_heater: 1
+  expansion_vessel: 1
+  isolating_valve: 2
+labor:
+  installation_hours: 3.0
+  hourly_rate: 38.00
+  category: plumbing
+waste_factor: 0.05

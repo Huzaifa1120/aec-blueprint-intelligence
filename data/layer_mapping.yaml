@@ -72,3 +72,60 @@ layer_mapping:
       - AHU
       - FCU
       - VAV
+  - assembly: sanitary_drainage
+    layers:
+      - P-SAN-MAIN
+      - P-SAN-BRANCH
+      - SANITARY
+  - assembly: water_supply
+    layers:
+      - P-DOM-CW
+      - P-DOM-HW
+      - WATER SUPPLY
+  - assembly: vent
+    layers:
+      - P-VENT
+      - VENT PIPE
+  - assembly: storm_downpipe
+    layers:
+      - M_SAUDI_RAIN DOWNPIPE
+      - P-STORM
+      - DOWNPIPE
+  - assembly: sprinkler_branch
+    layers:
+      - FP-SPRK-BRANCH
+      - SPRINKLER PIPE
+  - assembly: standpipe
+    layers:
+      - FP-STANDPIPE
+      - STANDPIPE
+  - assembly: sprinkler_head
+    layers:
+      - FP-SPRK-HEADS
+      - SPRINKLER HEAD
+  - assembly: hose_cabinet
+    layers:
+      - FP-HOSE-CAB
+      - HOSE CABINET
+  - assembly: smoke_detector
+    layers:
+      - FA-DETECTOR
+      - FIRE ALARM DETECTOR
+  - assembly: call_point
+    layers:
+      - FA-CALLPOINT
+      - FIRE ALARM CALLPOINT
+  - assembly: sounder
+    layers:
+      - FA-SOUNDER
+      - FIRE ALARM SOUNDER
+  - assembly: facp
+    layers:
+      - FA-FACP
+      - FIRE ALARM PANEL
+  - assembly: wc
+    layers:
+      - P-FIX-WC
+  - assembly: lavatory
+    layers:
+      - P-FIX-LAV

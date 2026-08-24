@@ -133,6 +133,8 @@ def load_assembly_rule(name: str) -> Optional[Dict]:
         "waste_factor": data.get("waste_factor", 0.10),
         "variables": data.get("variables", []) or [],
         "defaults": data.get("defaults", {}) or {},
+        "fixture_units": data.get("fixture_units"),
+        "fixture_unit_gauge": data.get("fixture_unit_gauge") or {},
     }
 
 

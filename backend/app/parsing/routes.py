@@ -128,6 +128,11 @@ def extract_polyline_from_items(
       - ('re', rect)           rectangle
 
     We flatten to a simple ordered polyline for length measurement.
+
+    pymupdf ≥1.28 returns each stroked line as BOTH ('l', p1, p2) and
+    ('l', p2, p1) items, so every segment would otherwise traverse twice
+    (~2–3× inflated route lengths). A line item that is the exact reversal
+    of the immediately preceding line item is skipped.
     """
     points: List[Tuple[float, float]] = []
 
@@ -145,6 +150,8 @@ def extract_polyline_from_items(
             return None
         return None
 
+    prev_line: Optional[Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]] = None
+
     for item in items:
         if not isinstance(item, tuple) or not item:
             continue
@@ -157,7 +164,24 @@ def extract_polyline_from_items(
             except (TypeError, ValueError):
                 continue
             points.extend([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
+            prev_line = None
+        elif op == "l" and len(item) >= 3:
+            p1, p2 = _point(item[1]), _point(item[2])
+            if p1 is not None and p2 is not None:
+                if prev_line is not None and prev_line == (p2, p1):
+                    prev_line = None
+                    continue
+                prev_line = (p1, p2)
+                points.append(p1)
+                points.append(p2)
+            else:
+                for operand in item[1:]:
+                    pt = _point(operand)
+                    if pt is not None:
+                        points.append(pt)
+                prev_line = None
         else:
+            prev_line = None
             for operand in item[1:]:
                 pt = _point(operand)
                 if pt is not None:
@@ -235,22 +259,30 @@ def measure_routes(
                 part = extract_polyline_from_path(path_obj)
             if not part:
                 continue
-            if not polyline_parts:
-                polyline_parts.extend(part)
-                continue
             # Nearest-end continuation: keep each path's internal item order,
             # reversing the whole incoming path only when its far end sits
             # nearer to the chain's running endpoint than its near end.
-            last_x, last_y = polyline_parts[-1]
-            start_x, start_y = part[0]
-            end_x, end_y = part[-1]
-            d_start = np.hypot(start_x - last_x, start_y - last_y)
-            d_end = np.hypot(end_x - last_x, end_y - last_y)
-            if d_end < d_start:
-                part = list(reversed(part))
-            polyline_parts.extend(part)
+            if polyline_parts:
+                last_x, last_y = polyline_parts[-1]
+                start_x, start_y = part[0]
+                end_x, end_y = part[-1]
+                d_start = np.hypot(start_x - last_x, start_y - last_y)
+                d_end = np.hypot(end_x - last_x, end_y - last_y)
+                if d_end < d_start:
+                    part = list(reversed(part))
+            for px, py in part:
+                # Collapse consecutive duplicates (shared endpoints between
+                # chained segments): a zero-length segment would otherwise
+                # mask true corners from geometry-derived fitting counts.
+                if not polyline_parts or (px, py) != polyline_parts[-1]:
+                    polyline_parts.append((px, py))
 
         if len(polyline_parts) < 2:
+            continue
+        # Degenerate cluster (all points identical, e.g. a zero-length vent
+        # stub): fewer than 2 DISTINCT points is no measurable route — skip
+        # instead of emitting a qty-0 BOQ row.
+        if len(set(polyline_parts)) < 2:
             continue
 
         # No coordinate sorting here: a lexicographic (x, y) sort destroys

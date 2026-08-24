@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiGet, apiPost } from "@/lib/api"
 import type { CatalogEntry } from "@/types/catalog"
+import type { MeasurementStatus } from "@/types/api"
 
 export function useCatalog() {
   return useQuery<CatalogEntry[], Error>({
@@ -15,6 +16,7 @@ export type ReviewActionKind = "accept" | "reject" | "correct"
 export interface ReviewAction {
   action: ReviewActionKind
   boq_item_id: string
+  confidence_tier: MeasurementStatus | "UNMAPPED"
   reason?: string
   corrected_value?: number
 }
@@ -22,6 +24,12 @@ export interface ReviewAction {
 interface SessionResponse {
   session_id?: string
   id?: string
+}
+
+interface ActionPayload {
+  item_id: string
+  action: string
+  confidence_tier: string
 }
 
 export function useReviewSession(estimateId: string | undefined) {
@@ -35,10 +43,10 @@ export function useReviewSession(estimateId: string | undefined) {
 
   const createSession = useMutation({
     mutationFn: () =>
-      apiPost<SessionResponse>(
-        "/api/review/sessions",
-        estimateId ? { project_id: estimateId } : {},
-      ),
+      apiPost<SessionResponse>("/api/review/sessions", {
+        sheet_label: estimateId ? `estimate:${estimateId}` : "workspace",
+        project_id: estimateId ?? null,
+      }),
     onSuccess: (data) => setSessionId(data.session_id ?? data.id ?? null),
   })
 
@@ -59,7 +67,12 @@ export function useReviewSession(estimateId: string | undefined) {
         sid = created.session_id ?? created.id ?? null
       }
       if (!sid) throw new Error("No review session")
-      await apiPost(`/api/review/sessions/${sid}/actions`, action)
+      const payload: ActionPayload = {
+        item_id: action.boq_item_id,
+        action: action.action,
+        confidence_tier: action.confidence_tier,
+      }
+      await apiPost(`/api/review/sessions/${sid}/actions`, payload)
       setReviewedCount((n) => n + 1)
     },
     [sessionId, createSession],

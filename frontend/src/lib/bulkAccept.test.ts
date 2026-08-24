@@ -4,6 +4,7 @@ import type { BoqItem } from "@/types/estimate"
 
 function item(partial: Partial<BoqItem>): BoqItem {
   return {
+    key: "x",
     id: "x",
     description: "d",
     quantity: 1,
