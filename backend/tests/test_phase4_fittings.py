@@ -1,5 +1,7 @@
 """Golden tests for geometry-derived fittings (Phase 4 spec §4)."""
 
+from app.core.config import get_settings
+from app.e2e.router import resolve_route_context
 from app.parsing.fittings import derive_fittings
 
 
@@ -63,3 +65,53 @@ def test_provenance_records_kind_and_ref():
     kinds = [p["kind"] for p in out["provenance"]]
     assert kinds == ["geometry_fittings:elbow"]
     assert "100.0,0.0" in out["provenance"][0]["ref"]
+
+
+# ---------------------------------------------------------------------------
+# Tee discipline restriction (final-review F1): sibling candidates in
+# resolve_route_context must classify into the target route's discipline.
+# Size resolves via the sanitary_drainage YAML default (diameter_mm 100).
+# ---------------------------------------------------------------------------
+
+
+def _ctx_with_sibling(sibling_layer: str):
+    target = {
+        "polyline": [(0.0, 0.0), (200.0, 0.0)],
+        "layer": "P-SAN-MAIN",
+        "length_m": 5.0,
+        "type": "sanitary_drainage",
+    }
+    sibling = {
+        "polyline": [(100.0, 0.0), (100.0, 80.0)],
+        "layer": sibling_layer,
+        "length_m": 2.0,
+        "type": "cable_tray",
+    }
+    all_routes = [target, sibling]
+    return resolve_route_context(
+        "sanitary_drainage",
+        all_routes[0],
+        [],  # cascade_spans
+        "1:100",  # scale
+        [],  # schedule_rows
+        [],  # components
+        all_routes,
+        0,
+        settings=get_settings(),
+    )
+
+
+def test_foreign_discipline_crossing_yields_no_tee():
+    ctx = _ctx_with_sibling("NORMAL TRAY")  # classifies electrical
+    assert ctx is not None
+    variables, _, size = ctx
+    assert float(variables["tees"]) == 0.0
+    assert float(size["tees"]) == 0.0
+
+
+def test_same_discipline_crossing_yields_one_tee():
+    ctx = _ctx_with_sibling("P-SAN-BRANCH")  # classifies plumbing
+    assert ctx is not None
+    variables, _, size = ctx
+    assert float(variables["tees"]) == 1.0
+    assert float(size["tees"]) == 1.0

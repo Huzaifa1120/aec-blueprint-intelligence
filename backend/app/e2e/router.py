@@ -55,7 +55,7 @@ from app.ingestion.router import classify_upload
 from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, _scale_denominator, parse_pdf
 from app.parsing.scale import detect_scale
 from app.parsing.clustering import cluster_paths_threshold, derive_threshold_px
-from app.parsing.layer_registry import classify_layers
+from app.parsing.layer_registry import classify_layers, discipline_of
 from app.parsing.routes import measure_routes
 from app.parsing.schedules import detect_blocks
 from app.parsing.sizes import detect_schedule_rows, resolve_route_size
@@ -348,9 +348,18 @@ def resolve_route_context(
     if any(var not in size for var in required_size_vars):
         size_source = "assumed"
 
+    # Tee candidates must classify into the SAME discipline as the target
+    # route (spec §4): an electrical tray crossing a water pipe is a visual
+    # overlap, never a junction. Elbows derive from the route's own polyline
+    # and are unaffected by the filter.
+    target_discipline = discipline_of(str(route.get("layer") or ""))
     fittings = derive_fittings(
         route,
-        [r for i, r in enumerate(all_routes) if i != route_index],
+        [
+            r
+            for i, r in enumerate(all_routes)
+            if i != route_index and discipline_of(str(r.get("layer") or "")) == target_discipline
+        ],
         bend_angle_deg=settings.fitting_bend_angle_deg,
         min_segment_pt=settings.fitting_min_segment_pt,
         junction_tol_pt=settings.fitting_junction_tol_pt,
