@@ -50,6 +50,7 @@ from app.assembly.formulas import (
 )
 from app.assembly.rules import load_assembly_rule
 from app.db.models.estimate import BoqItem, Estimate
+from app.db.models.project import Project
 from app.db.session import get_db
 from app.estimates.payload import payload_from_estimate
 from app.parsing.fixture_units import (
@@ -58,6 +59,31 @@ from app.parsing.fixture_units import (
 )
 
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
+
+
+@router.get("", summary="List persisted estimates")
+def list_estimates(db: OrmSession = Depends(get_db)) -> list[dict]:
+    """Read-only listing for the frontend estimates index.
+
+    Ordered by project name for stable display (Estimate carries no
+    timestamp column; adding one would be a migration).
+    """
+    rows = (
+        db.query(Estimate, Project)
+        .join(Project, Estimate.project_id == Project.id)
+        .all()
+    )
+    return [
+        {
+            "estimate_id": str(estimate.id),
+            "project_name": project.name,
+            "total_material_cost": estimate.total_material_cost,
+            "total_labor_cost": estimate.total_labor_cost,
+            "total_cost": estimate.total_cost,
+        }
+        for estimate, project in sorted(rows, key=lambda pair: pair[1].name)
+    ]
+
 
 _TOLERANCE = 1e-6
 
