@@ -39,7 +39,7 @@ import json
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as OrmSession
 
@@ -62,27 +62,39 @@ router = APIRouter(prefix="/api/estimates", tags=["estimates"])
 
 
 @router.get("", summary="List persisted estimates")
-def list_estimates(db: OrmSession = Depends(get_db)) -> list[dict]:
-    """Read-only listing for the frontend estimates index.
+def list_estimates(
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=20, ge=1, le=100),
+    db: OrmSession = Depends(get_db),
+) -> dict:
+    """Read-only paginated listing for the frontend estimates index.
 
-    Ordered by project name for stable display (Estimate carries no
-    timestamp column; adding one would be a migration).
+    Ordered by project name then estimate id for stable paging (Estimate
+    carries no timestamp column; adding one would be a migration).
     """
+    base = db.query(Estimate, Project).join(Project, Estimate.project_id == Project.id)
+    total = base.count()
     rows = (
-        db.query(Estimate, Project)
-        .join(Project, Estimate.project_id == Project.id)
+        base.order_by(Project.name, Estimate.id)
+        .offset((page - 1) * per_page)
+        .limit(per_page)
         .all()
     )
-    return [
-        {
-            "estimate_id": str(estimate.id),
-            "project_name": project.name,
-            "total_material_cost": estimate.total_material_cost,
-            "total_labor_cost": estimate.total_labor_cost,
-            "total_cost": estimate.total_cost,
-        }
-        for estimate, project in sorted(rows, key=lambda pair: pair[1].name)
-    ]
+    return {
+        "items": [
+            {
+                "estimate_id": str(estimate.id),
+                "project_name": project.name,
+                "total_material_cost": estimate.total_material_cost,
+                "total_labor_cost": estimate.total_labor_cost,
+                "total_cost": estimate.total_cost,
+            }
+            for estimate, project in rows
+        ],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 _TOLERANCE = 1e-6

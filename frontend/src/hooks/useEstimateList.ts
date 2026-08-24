@@ -1,11 +1,14 @@
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { apiGet } from "@/lib/api"
-import type { EstimateSummary } from "@/types/estimate"
+import type { EstimateListResponse } from "@/types/estimate"
 
-export function useEstimateList() {
-  return useQuery<EstimateSummary[], Error>({
-    queryKey: ["estimates"],
-    queryFn: () => apiGet<EstimateSummary[]>("/api/estimates"),
+export const ESTIMATES_PER_PAGE = 20
+
+export function useEstimateList(page: number = 1, perPage: number = ESTIMATES_PER_PAGE) {
+  return useQuery<EstimateListResponse, Error>({
+    queryKey: ["estimates", page, perPage],
+    queryFn: () => apiGet<EstimateListResponse>(`/api/estimates?page=${page}&per_page=${perPage}`),
+    placeholderData: keepPreviousData,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
   })

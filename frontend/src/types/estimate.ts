@@ -38,6 +38,13 @@ export interface EstimateSummary {
   total_cost: number
 }
 
+export interface EstimateListResponse {
+  items: EstimateSummary[]
+  total: number
+  page: number
+  per_page: number
+}
+
 export interface EstimateBoq {
   estimate_id: string
   totals: BoqTotals

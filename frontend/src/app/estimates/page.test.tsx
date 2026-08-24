@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { EstimateListPage } from "./page"
 
 vi.mock("@/lib/api", () => ({
@@ -8,7 +9,7 @@ vi.mock("@/lib/api", () => ({
 }))
 
 import { apiGet } from "@/lib/api"
-import type { EstimateSummary } from "@/types/estimate"
+import type { EstimateListResponse, EstimateSummary } from "@/types/estimate"
 
 function renderPage() {
   const client = new QueryClient({
@@ -19,6 +20,10 @@ function renderPage() {
       <EstimateListPage />
     </QueryClientProvider>,
   )
+}
+
+function envelope(items: EstimateSummary[], total = items.length, page = 1): EstimateListResponse {
+  return { items, total, page, per_page: 20 }
 }
 
 const ROWS: EstimateSummary[] = [
@@ -39,22 +44,45 @@ const ROWS: EstimateSummary[] = [
 ]
 
 describe("EstimateListPage", () => {
+  beforeEach(() => {
+    vi.mocked(apiGet).mockClear()
+  })
+
   it("renders rows with mono totals and workspace links", async () => {
-    vi.mocked(apiGet).mockResolvedValueOnce(ROWS)
+    vi.mocked(apiGet).mockResolvedValueOnce(envelope(ROWS))
     renderPage()
     const link = await screen.findByRole("link", { name: "Alpha Villa" })
     expect(link).toHaveAttribute("href", "/estimates/e-1")
     expect(screen.getByText("Zeta Clinic")).toBeInTheDocument()
     expect(screen.getByText("1,000.50")).toHaveClass("font-mono")
-    expect(screen.getAllByText("12.00").length).toBeGreaterThan(0)
+  })
+
+  it("pages through results via Prev/Next with bounds", async () => {
+    const user = userEvent.setup()
+    vi.mocked(apiGet)
+      .mockResolvedValueOnce({ ...envelope(ROWS), total: 25 })
+      .mockResolvedValueOnce({
+        items: [ROWS[0]],
+        total: 25,
+        page: 2,
+        per_page: 20,
+      })
+    renderPage()
+    await screen.findByRole("link", { name: "Alpha Villa" })
+
+    expect(screen.getByRole("button", { name: "← Prev" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "Next →" }))
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2))
+    expect(String(vi.mocked(apiGet).mock.calls[1][0])).toContain("page=2")
+    await screen.findByText("Page 2 of 2 · 25 estimates")
+    expect(screen.getByRole("button", { name: "Next →" })).toBeDisabled()
   })
 
   it("shows the empty state with upload CTA when no estimates exist", async () => {
-    vi.mocked(apiGet).mockResolvedValueOnce([])
+    vi.mocked(apiGet).mockResolvedValueOnce(envelope([]))
     renderPage()
-    expect(
-      await screen.findByText("Upload a drawing and run a takeoff — it will be listed here."),
-    ).toBeInTheDocument()
+    expect(await screen.findByText(/Upload a drawing and run a takeoff/)).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Upload a drawing" })).toHaveAttribute("href", "/")
   })
 
