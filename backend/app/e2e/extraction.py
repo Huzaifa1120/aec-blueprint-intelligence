@@ -9,15 +9,33 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 # Length-based assemblies: measured routes only (never point-based symbols).
+# Phase 4 adds plumbing/fire routes (sanitary_drainage, water_supply, vent,
+# sprinkler_branch, standpipe); storm_downpipe stays a counted kit, not a
+# route assembly (spec v3 Global Constraints refinement 1).
 ROUTE_ASSEMBLIES = {
     "cable_tray",
     "conduit",
     "duct_rectangular",
     "duct_round",
     "pipe_insulated",
+    "sanitary_drainage",
+    "water_supply",
+    "vent",
+    "sprinkler_branch",
+    "standpipe",
 }
-# Mechanical route assemblies whose cross-section size drives the formulas.
-SIZED_ASSEMBLIES = {"duct_rectangular", "duct_round", "pipe_insulated"}
+# Mechanical/plumbing/fire route assemblies whose cross-section size drives
+# the formulas.
+SIZED_ASSEMBLIES = {
+    "duct_rectangular",
+    "duct_round",
+    "pipe_insulated",
+    "sanitary_drainage",
+    "water_supply",
+    "vent",
+    "sprinkler_branch",
+    "standpipe",
+}
 
 
 @dataclass
