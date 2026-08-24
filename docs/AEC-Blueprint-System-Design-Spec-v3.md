@@ -189,6 +189,8 @@ layer_classification_rules:
     discipline: fire_protection
   - pattern: '^(FA-)'
     discipline: fire_alarm
+  - pattern: '^FIRE ALARM'
+    discipline: fire_alarm
   - pattern: '^M_SAUDI_RAIN DOWNPIPE'
     discipline: plumbing
   - pattern: '^M_SAUDI_(WATER_INSULATING|VENT_identy)'
