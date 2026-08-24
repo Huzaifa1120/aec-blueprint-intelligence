@@ -54,6 +54,26 @@ def test_fixture_units_declared():
     assert load_assembly_rule("floor_drain").get("fixture_units", 0.0) in (None, 0.0)
 
 
+def test_route_layers_includes_phase4_assemblies():
+    """route_layers() derives from canonical ROUTE_ASSEMBLIES, so every
+    plumbing/fire route layer is measured; storm_downpipe stays counted-kit."""
+    from app.parsing.layer_map import layer_to_assembly, load_layer_mapping, route_layers
+
+    routed = set(route_layers())
+    phase4_routes = {
+        "sanitary_drainage",
+        "water_supply",
+        "vent",
+        "sprinkler_branch",
+        "standpipe",
+    }
+    for entry in load_layer_mapping():
+        if entry.get("assembly") in phase4_routes:
+            assert set(entry["layers"]) <= routed, entry["assembly"]
+    assert layer_to_assembly("M_SAUDI_RAIN DOWNPIPE") == "storm_downpipe"
+    assert "M_SAUDI_RAIN DOWNPIPE" not in routed
+
+
 def test_layer_mapping_routes_new_layers():
     from app.parsing.layer_map import layer_to_assembly
 

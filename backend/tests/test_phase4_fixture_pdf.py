@@ -36,3 +36,30 @@ def test_fixture_builds_and_parses(tmp_path):
     text = page.get_text()
     assert "SCALE 1:100" in text
     assert "DN150" in text
+
+
+def test_extract_polyline_skips_reversed_duplicate_stroke():
+    """pymupdf >=1.28 emits each stroked line forward AND reversed; the exact
+    reversal of the immediately preceding line item must not double-count."""
+    from app.parsing.routes import extract_polyline_from_items
+
+    a, b, c = (0.0, 0.0), (10.0, 0.0), (10.0, 8.0)
+    assert extract_polyline_from_items([("l", a, b), ("l", b, a)]) == [a, b]
+    # A genuinely continuing stroke is untouched (both operands appended,
+    # exactly as before the fix).
+    assert extract_polyline_from_items([("l", a, b), ("l", b, c)]) == [a, b, b, c]
+
+
+def test_measure_routes_skips_zero_extent_cluster():
+    """A cluster whose paths yield identical points produces NO route."""
+    from app.parsing.routes import measure_routes
+
+    raw_drawings = [
+        {
+            "id": "vent-stub",
+            "layer": "P-VENT",
+            "items": [("l", (450.0, 550.0), (450.0, 550.0))],
+        }
+    ]
+    clusters = [{"member_path_ids": ["vent-stub"]}]
+    assert measure_routes(clusters, raw_drawings, "1:100") == []

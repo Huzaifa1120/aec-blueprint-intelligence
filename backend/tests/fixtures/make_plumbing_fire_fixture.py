@@ -101,9 +101,9 @@ _TITLE_BLOCK_V_XS = [300, 550, 800, 1000]
 
 EXPECTED = {
     "scale": "1:100",
-    "sanitary_main": {"length_pt": 450.0, "size_label": "DN150", "elbows": 2},
-    "cold_main": {"length_pt": 458.31, "fu_expected": 70.0, "excluded_fixtures": 1},
-    "sprinkler_branch": {"length_pt": 350.0, "size_label": "Ø50", "elbows": 2},
+    "sanitary_main": {"length_pt": 450.0, "size_label": "DN150", "elbows": 1},
+    "cold_main": {"length_pt": 484.85, "fu_expected": 70.0, "excluded_fixtures": 1},
+    "sprinkler_branch": {"length_pt": 350.0, "size_label": "Ø50", "elbows": 1},
     "standpipe": {"length_pt": 450.0, "size_label": "DN100"},
     "heads": 6,
     "fixtures_in_corridor": {"wc": 20, "lavatory": 10},
