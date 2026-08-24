@@ -230,6 +230,8 @@ src/app/
 
 No `/estimates` list page in v1 — auth is out of scope, so there's no per-user project list. The upload page acts as the entry point; after processing, the browser navigates to `/estimates/[id]`. If a user bookmarks the estimate URL, the server component fetches and renders it directly.
 
+> **Amendment 2026-08-24 (owner ruling):** an `/estimates` index page **was implemented** (supersedes the "no list page in v1" decision above). Backend `GET /api/estimates` returns persisted estimates (project name + cost totals, ordered by project name); the page renders them as a mono-tabular table linking into workspaces, with named-failure/empty states. `AppShell` now carries persistent **Estimates** + **Catalog** nav links on every page. Commits `a7adfbd` (backend) · `7ba3fd5` (frontend).
+
 ### 3.2 Server vs Client Component Split
 
 **Rule:** default to server components. Add `'use client'` only when a component uses browser APIs, event handlers, or React hooks. Never mark a component client just because it's "interactive."
