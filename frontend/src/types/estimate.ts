@@ -50,6 +50,8 @@ export interface EstimateBoq {
   totals: BoqTotals
   routes: BoqRouteLine[]
   materials: BoqLine[]
+  scale?: { value: string; status: "detected" | "assumed" } | null
+  data_quality?: Record<string, number> | null
 }
 
 export interface BoqSourceRegion {

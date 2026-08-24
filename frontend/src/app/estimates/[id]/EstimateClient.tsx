@@ -38,6 +38,7 @@ import {
 import { CorrectionDialog, type CorrectionResult } from "@/components/estimate/CorrectionDialog"
 import { ReviewProgress } from "@/components/estimate/ReviewProgress"
 import { UnpricedGap } from "@/components/estimate/UnpricedGap"
+import { AssumedScaleBanner } from "@/components/estimate/AssumedScaleBanner"
 import type {
   BoqItem,
   Discipline,
@@ -424,6 +425,8 @@ function Workspace({ estimateId, boq }: WorkspaceProps) {
                   onAcceptAll={handleAcceptAll}
                   acceptingAll={acceptingAll}
                 />
+
+                {boq.scale?.status === "assumed" && <AssumedScaleBanner status="assumed" />}
 
                 <UnpricedGap count={counts.unpriced} />
 
