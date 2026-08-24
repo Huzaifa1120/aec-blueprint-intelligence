@@ -270,7 +270,14 @@ def test_partial_dim_cascade_persists_assumed_tier(client, tmp_path, monkeypatch
     pdf_path = str(tmp_path / "hvac_fixture.pdf")
     build_hvac_fixture(pdf_path)
 
-    def _width_only(route, text_spans, scale, schedule_rows=None, default_size=None):
+    def _width_only(
+        route,
+        text_spans,
+        scale,
+        schedule_rows=None,
+        default_size=None,
+        fixture_unit_size=None,
+    ):
         return {"width_mm": 600.0, "source": "label", "ref": "text_span:600x400"}
 
     monkeypatch.setattr(router_module, "resolve_route_size", _width_only)

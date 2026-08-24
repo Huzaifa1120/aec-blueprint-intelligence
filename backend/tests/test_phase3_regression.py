@@ -3,14 +3,15 @@
 Ground truth comes from tests/fixtures/make_hvac_fixture.py (deterministic
 geometry at scale 1:100).
 
-SHAPE_EMISSION_FACTOR: pymupdf's Shape.commit() writes every stroke as an
-out-and-back subpath (verified: items == [('l',a,b),('l',b,a)] up to float
-drift), so measure_routes sees exactly 3x the drawn length per run — 2x
-in-stroke (forward+back) plus 1x inter-stroke continuation jump. The factor
-is a property of the generator toolchain, not of the pipeline; real CAD
-exports emit single-direction paths and are unaffected. Absolute physical
-length truth lives in the Task 1/4 golden unit tests; this file gates
-pipeline integrity (clustering -> cascade -> formula -> provenance).
+SHAPE_EMISSION_FACTOR: measured values equal drawn truth at 1x. The
+historical value 3.0 compensated for pymupdf >=1.28 emitting every stroke as
+a forward+reverse pair (items == [('l',a,b),('l',b,a)]), which inflated
+measure_routes ~3x; that toolchain artifact was removed by the stroke-dedup
+in app/parsing/routes.py (commit 801c06a, Phase 4, 2026-08-24), so measured
+route lengths are now 1x drawn truth and the factor is rebased accordingly.
+Absolute physical length truth lives in the Task 1/4 golden unit tests; this
+file gates pipeline integrity (clustering -> cascade -> formula ->
+provenance).
 """
 import os
 
@@ -20,7 +21,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from tests.fixtures.make_hvac_fixture import build_hvac_fixture
 
-SHAPE_EMISSION_FACTOR = 3.0
+SHAPE_EMISSION_FACTOR = 1.0
 
 SAMPLE = os.path.join(
     os.path.dirname(__file__),

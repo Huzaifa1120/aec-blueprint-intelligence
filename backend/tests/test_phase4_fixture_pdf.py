@@ -24,7 +24,14 @@ def test_fixture_builds_and_parses(tmp_path):
     doc = pymupdf.open(PDF)
     page = doc[0]
     layers = {v["name"] for v in doc.get_ocgs().values()}
-    assert {"P-SAN-MAIN", "P-DOM-CW", "FP-SPRK-BRANCH", "FA-DETECTOR"} <= layers
+    assert {
+        "P-SAN-MAIN",
+        "P-DOM-CW",
+        "P-FIX-WC",
+        "P-FIX-LAV",
+        "FP-SPRK-BRANCH",
+        "FA-DETECTOR",
+    } <= layers
     drawings = page.get_drawings()
     per_layer = {}
     for d in drawings:
@@ -33,6 +40,17 @@ def test_fixture_builds_and_parses(tmp_path):
             per_layer[d["layer"]] += 1
     assert per_layer.get("FP-SPRK-HEADS", 0) >= 6
     assert per_layer.get("P-VENT", 0) == 1
+    # Fixture symbols live on their own typed layers: 20 corridor WCs + the
+    # far excluded WC on P-FIX-WC, all 10 lavatories on P-FIX-LAV.
+    assert per_layer.get("P-FIX-WC", 0) == 21
+    assert per_layer.get("P-FIX-LAV", 0) == 10
+    # Symbols stay out of route-layer geometry paths: every P-DOM-CW drawing
+    # is pure polyline (line items only — no rects/circles leaked onto it).
+    cw_paths = [d for d in drawings if d.get("layer") == "P-DOM-CW"]
+    assert cw_paths, "cold-water main missing from P-DOM-CW"
+    assert all(item[0] == "l" for d in cw_paths for item in d["items"]), (
+        "symbol geometry leaked onto the water-supply route layer"
+    )
     text = page.get_text()
     assert "SCALE 1:100" in text
     assert "DN150" in text

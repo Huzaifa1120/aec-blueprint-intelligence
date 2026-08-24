@@ -64,13 +64,16 @@ STANDPIPE_PTS = [(1100.0, 750.0), (1100.0, 300.0)]  # zero bends
 # Degenerate single-point path: must produce no route and no phantom BOQ row.
 VENT_STUB_PT = (450.0, 550.0)
 
-# CW fixtures inside the stated y=410..430 band, spread x=120..480. Every
-# fixture CENTROID stays within the 24pt FU corridor of the cold-water main
+# Fixture symbols inside the stated y=410..430 band, spread x=120..480,
+# drawn on their own typed OCGs (P-FIX-WC / P-FIX-LAV) so the layer mapping
+# types them wc/lavatory and the FU tier fires end-to-end. Every fixture
+# CENTROID stays within the 24pt FU corridor of the cold-water main
 # (WC centers 10pt, lavatory centers 21pt below it) so all 30 are counted.
 # Same-layer symbol bboxes stay >5pt apart (the fallback cluster threshold):
 # a single WC row keeps 20 symbols ~15pt apart, and the lavatory row sits
 # 6.5pt below them — nothing merges into the route cluster and no two
-# fixtures collapse into one component.
+# fixtures collapse into one component. Symbols never touch route-layer
+# geometry paths: P-DOM-CW carries only the cold-main polyline.
 _WC_ROW_PITCH = 360.0 / 19.0
 WC_RECTS = [(120.0 + k * _WC_ROW_PITCH, 408.0, 124.0 + k * _WC_ROW_PITCH, 412.0) for k in range(20)]
 LAVATORY_CIRCLES = [((150.0 + 33.0 * m, 421.0), 2.5) for m in range(10)]
@@ -121,6 +124,8 @@ def build_plumbing_fire_fixture(path: str) -> Dict:
             "P-SAN-MAIN",
             "P-SAN-BRANCH",
             "P-DOM-CW",
+            "P-FIX-WC",
+            "P-FIX-LAV",
             "P-VENT",
             "FP-SPRK-BRANCH",
             "FP-SPRK-HEADS",
@@ -148,10 +153,10 @@ def build_plumbing_fire_fixture(path: str) -> Dict:
     shape.finish(color=(0, 0, 1), width=1, oc=ocg["P-VENT"])
     for rect in WC_RECTS + [EXTRA_WC_RECT]:
         shape.draw_rect(pymupdf.Rect(rect))
-        shape.finish(color=(1, 0, 0), width=1, oc=ocg["P-DOM-CW"])
+        shape.finish(color=(1, 0, 0), width=1, oc=ocg["P-FIX-WC"])
     for center, r in LAVATORY_CIRCLES:
         shape.draw_circle(center, r)
-        shape.finish(color=(1, 0, 0), width=1, oc=ocg["P-DOM-CW"])
+        shape.finish(color=(1, 0, 0), width=1, oc=ocg["P-FIX-LAV"])
     for center, r in SPRINKLER_HEADS:
         shape.draw_circle(center, r)
         shape.finish(color=(1, 0, 0), width=1, oc=ocg["FP-SPRK-HEADS"])

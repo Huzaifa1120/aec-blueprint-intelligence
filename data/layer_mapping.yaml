@@ -123,3 +123,9 @@ layer_mapping:
     layers:
       - FA-FACP
       - FIRE ALARM PANEL
+  - assembly: wc
+    layers:
+      - P-FIX-WC
+  - assembly: lavatory
+    layers:
+      - P-FIX-LAV
