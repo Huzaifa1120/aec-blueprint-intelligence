@@ -59,6 +59,8 @@ describe("state components", () => {
       </AppShell>,
     )
     expect(screen.getByRole("link", { name: "AEC Blueprint" })).toHaveAttribute("href", "/")
+    expect(screen.getByRole("link", { name: "Estimates" })).toHaveAttribute("href", "/estimates")
+    expect(screen.getByRole("link", { name: "Catalog" })).toHaveAttribute("href", "/catalog")
     expect(screen.getByText("Export ▾")).toBeInTheDocument()
     expect(screen.getByText("workspace")).toBeInTheDocument()
   })

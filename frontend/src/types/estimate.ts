@@ -30,6 +30,14 @@ export interface BoqRouteLine extends BoqLine {
   size_json: Record<string, unknown> | null
 }
 
+export interface EstimateSummary {
+  estimate_id: string
+  project_name: string
+  total_material_cost: number
+  total_labor_cost: number
+  total_cost: number
+}
+
 export interface EstimateBoq {
   estimate_id: string
   totals: BoqTotals

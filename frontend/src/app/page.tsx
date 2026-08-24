@@ -1,6 +1,5 @@
 "use client"
 
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
@@ -115,13 +114,7 @@ export default function UploadPage() {
   }
 
   return (
-    <AppShell
-      right={
-        <Link href="/catalog" className="text-sm text-ink-500 hover:text-ink-900">
-          Catalog
-        </Link>
-      }
-    >
+    <AppShell>
       <div className="mx-auto flex w-full max-w-xl flex-col gap-8 px-4 py-16">
         <h1 className="text-xl font-semibold text-ink-900">Upload a drawing to begin</h1>
 
