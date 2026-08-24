@@ -36,25 +36,40 @@ export function normalizeImportError(error: CatalogImportError): NormalizedImpor
   }
 }
 
-function buildTemplateCsv(): string {
-  return [
-    "material_name,unit,unit_price,category,effective_from,effective_to,source",
-    "<name>,<ea|m|nr|...>,<unit_price>,<category>,YYYY-MM-DD,,spreadsheet_import",
-    "",
-    "rate_name,productivity_rate,hourly_rate,category,effective_from,effective_to,source",
-    "<name>,<units per labor-hour>,<hourly_rate>,<category>,YYYY-MM-DD,,spreadsheet_import",
-    "",
-  ].join("\n")
+export type TemplateKind = "materials" | "labor"
+
+const TEMPLATE_HEADERS = {
+  materials: "material_name,unit,unit_price,category,effective_from,effective_to,source",
+  labor: "rate_name,productivity_rate,hourly_rate,category,effective_from,effective_to,source",
+} as const
+
+const TEMPLATE_ROWS = {
+  materials: [
+    "Sample Cable 3-core,m,1.00,electrical,2026-01-01,,spreadsheet_import",
+    "Sample Device,ea,1.00,electrical,2026-01-01,,spreadsheet_import",
+    "Sample Conduit 25mm,m,1.00,electrical,2026-01-01,,spreadsheet_import",
+  ],
+  labor: [
+    "Sample Trade,10,120.00,electrical,2026-01-01,,spreadsheet_import",
+    "Sample Fitter,8,110.00,mechanical,2026-01-01,,spreadsheet_import",
+  ],
+} as const
+
+export function buildTemplateCsv(kind: TemplateKind): string {
+  return [TEMPLATE_HEADERS[kind], ...TEMPLATE_ROWS[kind]].join("\n") + "\n"
 }
 
-function downloadTemplate() {
-  const blob = new Blob([buildTemplateCsv()], { type: "text/csv" })
+export function downloadTemplate(kind: TemplateKind): void {
+  const blob = new Blob([buildTemplateCsv(kind)], { type: "text/csv;charset=utf-8" })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement("a")
   anchor.href = url
-  anchor.download = "catalog-template.csv"
+  anchor.download =
+    kind === "materials" ? "catalog-materials-template.csv" : "catalog-labor-rates-template.csv"
+  document.body.appendChild(anchor)
   anchor.click()
-  URL.revokeObjectURL(url)
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 function formatImportLine({ row, message }: NormalizedImportError): string {
@@ -139,9 +154,13 @@ export function CatalogImport() {
         )}
 
         <p className="text-xs text-ink-500">
-          Template:{" "}
-          <Button variant="link" size="xs" onClick={downloadTemplate}>
-            Download starter CSV
+          Templates (one schema per file):{" "}
+          <Button variant="link" size="xs" onClick={() => downloadTemplate("materials")}>
+            Materials CSV
+          </Button>{" "}
+          ·{" "}
+          <Button variant="link" size="xs" onClick={() => downloadTemplate("labor")}>
+            Labor rates CSV
           </Button>
         </p>
 

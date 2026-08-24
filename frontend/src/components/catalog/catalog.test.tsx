@@ -22,7 +22,7 @@ vi.mock("@/lib/api", () => ({
   apiPostForm: mocks.apiPostForm,
 }))
 
-import { CATALOG_IMPORT_CARD_ID, CatalogImport } from "./CatalogImport"
+import { buildTemplateCsv, CATALOG_IMPORT_CARD_ID, CatalogImport } from "./CatalogImport"
 import { CatalogTable, formatEffective, formatRate } from "./CatalogTable"
 
 function makeQueryClient() {
@@ -287,7 +287,7 @@ describe("CatalogImport", () => {
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
   })
 
-  it("offers the starter CSV template download", async () => {
+  it("offers separate materials and labor template downloads", async () => {
     const user = userEvent.setup()
     const clickSpy = vi.fn()
     const createObjectURLSpy = vi.fn(() => "blob:template")
@@ -299,9 +299,31 @@ describe("CatalogImport", () => {
     HTMLAnchorElement.prototype.click = clickSpy
     renderWithClient(<CatalogImport />)
 
-    await user.click(screen.getByRole("button", { name: "Download starter CSV" }))
-    expect(clickSpy).toHaveBeenCalled()
-    const anchor = clickSpy.mock.instances[0] as HTMLAnchorElement
-    expect(anchor.download).toBe("catalog-template.csv")
+    await user.click(screen.getByRole("button", { name: "Materials CSV" }))
+    let anchor = clickSpy.mock.instances[0] as HTMLAnchorElement
+    expect(anchor.download).toBe("catalog-materials-template.csv")
+
+    await user.click(screen.getByRole("button", { name: "Labor rates CSV" }))
+    anchor = clickSpy.mock.instances[1] as HTMLAnchorElement
+    expect(anchor.download).toBe("catalog-labor-rates-template.csv")
+  })
+
+  it("builds single-schema, importable template CSVs", () => {
+    for (const kind of ["materials", "labor"] as const) {
+      const csv = buildTemplateCsv(kind)
+      const lines = csv.trimEnd().split("\n")
+      expect(lines.length).toBeGreaterThan(1)
+      expect(csv).not.toContain("<")
+      const header = lines[0]
+      for (const line of lines.slice(1)) {
+        expect(line.split(",").length).toBe(header.split(",").length)
+      }
+    }
+    expect(buildTemplateCsv("materials").split("\n")[0]).toBe(
+      "material_name,unit,unit_price,category,effective_from,effective_to,source",
+    )
+    expect(buildTemplateCsv("labor").split("\n")[0]).toBe(
+      "rate_name,productivity_rate,hourly_rate,category,effective_from,effective_to,source",
+    )
   })
 })
