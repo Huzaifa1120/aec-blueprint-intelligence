@@ -99,12 +99,32 @@ def test_plumbing_fire_fixture_end_to_end():
         EXPECTED["cold_main"]["length_pt"] * PT_TO_M * waste_pipe, abs=2e-3
     )
 
+    # Geometry-derived fittings are live end-to-end: the cold main's corner
+    # at (500,400) is one elbow; nothing taps it, so no tees.
+    assert _pipe_qty(boq, "water_supply", "elbow_fitting") == pytest.approx(1.0)
+    assert _pipe_qty(boq, "water_supply", "tee_fitting") == 0.0
+
+    # Sanitary main: one interior elbow at (400,700); the branch tip lands on
+    # its first-segment interior -> exactly one tee.
+    assert _pipe_qty(boq, "sanitary_drainage", "bend_90_elbow") == pytest.approx(
+        1 * 1.05
+    )
+    assert _pipe_qty(boq, "sanitary_drainage", "junction_tee") == pytest.approx(1.0)
+
     assert _pipe_qty(boq, "sprinkler_branch", "branch_pipe_m") == pytest.approx(
         EXPECTED["sprinkler_branch"]["length_pt"] * PT_TO_M * waste_pipe, abs=2e-3
     )
+    # One true corner at (950,700), no junctions on the sprinkler branch.
+    assert _pipe_qty(boq, "sprinkler_branch", "elbow_fitting") == pytest.approx(
+        EXPECTED["sprinkler_branch"]["elbows"] * 1.0
+    )
+    assert _pipe_qty(boq, "sprinkler_branch", "tee_fitting") == 0.0
+
     assert _pipe_qty(boq, "standpipe", "standpipe_m") == pytest.approx(
         EXPECTED["standpipe"]["length_pt"] * PT_TO_M * waste_pipe, abs=2e-3
     )
+    # Straight run with no junctions: zero fittings stay honest zeros.
+    assert _pipe_qty(boq, "standpipe", "bend_90_elbow") == 0.0
 
     # The degenerate vent stub yields no route and therefore no BOQ rows.
     assert not any(i["assembly_type"] == "vent" for i in boq)

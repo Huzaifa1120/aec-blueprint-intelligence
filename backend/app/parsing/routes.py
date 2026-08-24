@@ -259,20 +259,23 @@ def measure_routes(
                 part = extract_polyline_from_path(path_obj)
             if not part:
                 continue
-            if not polyline_parts:
-                polyline_parts.extend(part)
-                continue
             # Nearest-end continuation: keep each path's internal item order,
             # reversing the whole incoming path only when its far end sits
             # nearer to the chain's running endpoint than its near end.
-            last_x, last_y = polyline_parts[-1]
-            start_x, start_y = part[0]
-            end_x, end_y = part[-1]
-            d_start = np.hypot(start_x - last_x, start_y - last_y)
-            d_end = np.hypot(end_x - last_x, end_y - last_y)
-            if d_end < d_start:
-                part = list(reversed(part))
-            polyline_parts.extend(part)
+            if polyline_parts:
+                last_x, last_y = polyline_parts[-1]
+                start_x, start_y = part[0]
+                end_x, end_y = part[-1]
+                d_start = np.hypot(start_x - last_x, start_y - last_y)
+                d_end = np.hypot(end_x - last_x, end_y - last_y)
+                if d_end < d_start:
+                    part = list(reversed(part))
+            for px, py in part:
+                # Collapse consecutive duplicates (shared endpoints between
+                # chained segments): a zero-length segment would otherwise
+                # mask true corners from geometry-derived fitting counts.
+                if not polyline_parts or (px, py) != polyline_parts[-1]:
+                    polyline_parts.append((px, py))
 
         if len(polyline_parts) < 2:
             continue

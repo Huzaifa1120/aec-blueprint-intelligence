@@ -81,3 +81,32 @@ def test_measure_routes_skips_zero_extent_cluster():
     ]
     clusters = [{"member_path_ids": ["vent-stub"]}]
     assert measure_routes(clusters, raw_drawings, "1:100") == []
+
+
+def test_measure_routes_collapses_join_duplicate_points():
+    """Chained segment parts must not keep their shared endpoint twice.
+
+    A kept duplicate makes the true corner's outgoing segment zero-length,
+    so derive_fittings' min-segment guard would skip every corner (fittings
+    silently dead on segmented CAD exports).
+    """
+    from app.parsing.fittings import derive_fittings
+    from app.parsing.routes import measure_routes
+
+    raw_drawings = [
+        {
+            "id": "seg-a",
+            "layer": "P-SAN-MAIN",
+            "items": [("l", (0.0, 0.0), (100.0, 0.0))],
+        },
+        {
+            "id": "seg-b",
+            "layer": "P-SAN-MAIN",
+            "items": [("l", (100.0, 0.0), (100.0, 80.0))],
+        },
+    ]
+    clusters = [{"member_path_ids": ["seg-a", "seg-b"]}]
+    routes = measure_routes(clusters, raw_drawings, "1:100", ("P-SAN-MAIN",))
+    assert len(routes) == 1
+    assert routes[0]["polyline"] == [(0.0, 0.0), (100.0, 0.0), (100.0, 80.0)]
+    assert derive_fittings(routes[0])["elbows_90"] == 1

@@ -287,13 +287,17 @@ def resolve_route_context(
     scale: str,
     schedule_rows: List[Dict],
     components: List[Dict],
+    all_routes: List[Dict],
+    route_index: int,
+    *,
     settings: "Settings",
 ) -> Optional[Tuple[Dict, Optional[str], Optional[Dict]]]:
     """Cascade + fittings + FU for one sized route.
 
     Returns (variables, size_source, size) or None if the route must be
     dropped (fail-honest). `size` is the raw cascade dict including any
-    fu_total/ref provenance keys.
+    fu_total/ref provenance keys. Sibling routes feed junction (tee)
+    detection: a foreign vertex landing on this route's interior is a tee.
     """
     from app.parsing.fittings import derive_fittings
     from app.parsing.fixture_units import accumulate_fixture_units, resolve_size_from_fixture_units
@@ -346,6 +350,7 @@ def resolve_route_context(
 
     fittings = derive_fittings(
         route,
+        [r for i, r in enumerate(all_routes) if i != route_index],
         bend_angle_deg=settings.fitting_bend_angle_deg,
         min_segment_pt=settings.fitting_min_segment_pt,
         junction_tol_pt=settings.fitting_junction_tol_pt,
@@ -457,7 +462,8 @@ def e2e_run(
                 if assembly_type in SIZED_ASSEMBLIES:
                     ctx = resolve_route_context(
                         assembly_type, route, cascade_spans, scale,
-                        schedule_rows, extraction_components, get_settings(),
+                        schedule_rows, extraction_components, routes,
+                        route_index, settings=get_settings(),
                     )
                     if ctx is None:
                         logger.warning(
