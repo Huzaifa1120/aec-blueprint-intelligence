@@ -6,6 +6,8 @@ test("home renders shell, heading and nav", async ({ page, consoleErrors }) => {
   await expect(page.getByRole("heading", { name: "Upload a drawing to begin" })).toBeVisible()
   await expect(page.getByRole("link", { name: "Estimates" })).toBeVisible()
   await expect(page.getByRole("link", { name: "Catalog" })).toBeVisible()
+  await expect(page.getByText("Pipeline contract")).toBeVisible()
+  await expect(page.getByText("Deterministic takeoff")).toBeVisible()
   expect(consoleErrors.filter((line) => !line.includes("favicon"))).toEqual([])
 })
 

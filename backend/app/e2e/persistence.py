@@ -24,20 +24,71 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from pathlib import Path
+from typing import Any
 
 from sqlalchemy.orm import Session as OrmSession
 
 from app.assembly.formulas import FormulaValidationError
 from app.assembly.rules import apply_assembly, load_assembly_rule
-from app.catalog.prices import compute_boq_item
+from app.catalog.prices import compute_boq_item, compute_labor_cost
+from app.core.config import get_settings
 from app.db.models.estimate import BoqItem, Estimate, Measurement
 from app.db.models.extraction import Layer, ScheduleBlock, TextAnnotation
 from app.db.models.geometry import Component, Route
 from app.db.models.project import Drawing, Project, Sheet
 from app.e2e.extraction import ROUTE_ASSEMBLIES, SIZED_ASSEMBLIES, SheetExtraction
+from app.parsing.confidence_tiering import confidence_score
 from app.parsing.layer_map import layer_to_assembly
 
 logger = logging.getLogger(__name__)
+
+# Storage for the original uploaded drawing, one file per estimate
+# (backend/data/uploads/<estimate_id>.pdf). Created on demand; the recorded
+# path is what GET /api/estimates/{id}/file serves.
+_UPLOADS_DIR = Path(__file__).resolve().parents[2] / "data" / "uploads"
+
+
+def live_confidence_tier(
+    *,
+    size_source: str | None,
+    scale_assumed: bool,
+    source_quality: str,
+    rule_version: str | None,
+) -> tuple[str, float]:
+    """The single live-tier rule for priced BOQ lines (T3-review ruling).
+
+    Shared by the e2e response builder (``app.e2e.router._boq_line``) and this
+    persistence spine so a replayed estimate reads exactly the tiers a fresh
+    run carried — never the row-level MEASURED status. ASSUMED wins over
+    DERIVED; degraded input quality multiplies the score.
+    """
+    if size_source == "assumed" or scale_assumed:
+        tier = "ASSUMED"
+        score = 0.3
+    else:
+        tier = "DERIVED"
+        score = confidence_score("DERIVED", {"rule_version": rule_version or "1.0.0"})
+    if source_quality == "degraded_vector":
+        score = round(score * get_settings().degraded_confidence_multiplier, 4)
+    return tier, score
+
+
+def _source_region(page: int | None, bbox: Any) -> dict | None:
+    """Normalized click-through region ``{"page", "bbox"}``; None when absent.
+
+    Same shape the live response carries in each BOQ row's ``source`` block,
+    so payload round-trips are value-identical.
+    """
+    if not bbox:
+        return None
+    try:
+        corners = [float(v) for v in bbox]
+    except (TypeError, ValueError):
+        return None
+    if len(corners) < 4:
+        return None
+    return {"page": int(page or 0), "bbox": corners}
 
 
 def _resolve_project(db: OrmSession, project_id: uuid.UUID | None) -> Project:
@@ -158,6 +209,9 @@ def _persist_route_boq(
     rule_version: str,
     size_source: str | None,
     layer_ocg: str,
+    *,
+    scale_status: str | None = None,
+    source: dict | None = None,
 ) -> None:
     """Derive and persist the material lines for one measured route."""
     assembly = layer_to_assembly(layer_ocg) or route_row.route_type
@@ -180,6 +234,15 @@ def _persist_route_boq(
             exc,
         )
         return
+
+    # Live tier exactly as the response carried it (T3 ruling) — same inputs,
+    # same rule as app.e2e.router._boq_line via the shared helper.
+    tier, score = live_confidence_tier(
+        size_source=size_source,
+        scale_assumed=(scale_status == "assumed"),
+        source_quality=source_quality,
+        rule_version=applied.get("rule_version"),
+    )
 
     rule_dict = load_assembly_rule(assembly) or {}
     rule_bom = rule_dict.get("bom")
@@ -231,6 +294,28 @@ def _persist_route_boq(
             payload,
             source_quality,
             size_source,
+            source=source,
+            confidence_status=tier,
+            confidence_score=score,
+        )
+
+    # One extra BOQ line per rule-with-labor (spec v3 §7.14): same
+    # measurement/tier treatment as the material lines above.
+    labor_payload = labor_line_payload(rule_dict, assembly, applied, rule_version)
+    if labor_payload is not None:
+        _add_boq_item(
+            db,
+            estimate,
+            measurement,
+            labor_payload["material_name"],
+            float(applied.get("labor_hours") or 0.0),
+            labor_payload,
+            source_quality,
+            size_source,
+            source=source,
+            confidence_status=tier,
+            confidence_score=score,
+            labor_payload=labor_payload,
         )
 
 
@@ -242,6 +327,8 @@ def _persist_component_boq(
     confidence_status: str,
     source_quality: str,
     rule_version: str,
+    *,
+    source: dict | None = None,
 ) -> None:
     """Derive and persist the material lines for one counted symbol type."""
     resolved_type = component_row.component_type
@@ -265,6 +352,17 @@ def _persist_component_boq(
     materials = applied.get("materials", [])
     if not materials:
         return
+
+    # Live tier exactly as the response carried it (T3 ruling). T3 carve-out:
+    # component quantities are count × rule multiplier — scale-independent by
+    # construction — so counted lines never take the assumed-scale downgrade
+    # (neither does the live response's component call site).
+    tier, score = live_confidence_tier(
+        size_source=None,
+        scale_assumed=False,
+        source_quality=source_quality,
+        rule_version=applied.get("rule_version"),
+    )
 
     measurement = Measurement(
         component_id=component_row.id,
@@ -298,7 +396,58 @@ def _persist_component_boq(
             payload,
             source_quality,
             None,
+            source=source,
+            confidence_status=tier,
+            confidence_score=score,
         )
+
+    # One extra BOQ line per rule-with-labor, scaled by the type's count
+    # exactly like the material lines (spec v3 §7.14).
+    labor_payload = labor_line_payload(rule, resolved_type, applied, rule_version)
+    if labor_payload is not None:
+        _add_boq_item(
+            db,
+            estimate,
+            measurement,
+            labor_payload["material_name"],
+            float(applied.get("labor_hours") or 0.0) * count,
+            labor_payload,
+            source_quality,
+            None,
+            source=source,
+            confidence_status=tier,
+            confidence_score=score,
+            labor_payload=labor_payload,
+        )
+
+
+def labor_line_payload(
+    rule_dict: dict | None,
+    assembly: str,
+    applied: dict,
+    fallback_version: str | None,
+) -> dict | None:
+    """Labor BOQ payload for one applied assembly (spec v3 §7.14).
+
+    Returns None when the rule bills no hours (missing/zero
+    ``installation_hours`` or no labor block). Shared by this module and
+    ``app.e2e.router`` so response and persisted labor lines carry identical
+    provenance. ``rate_source`` is stamped at pricing time; replay treats the
+    resulting derivation as an unrecognized branch — unchecked-honest.
+    """
+    hours = float(applied.get("labor_hours") or 0.0)
+    labor = (rule_dict or {}).get("labor") or {}
+    if not labor or hours <= 0:
+        return None
+    category = labor.get("category")
+    return {
+        "material_name": f"labor:{category or assembly}",
+        "unit": "hour",
+        "rule_name": assembly,
+        "rule_version": str(applied.get("rule_version") or fallback_version or ""),
+        "category": category,
+        "hourly_rate": labor.get("hourly_rate"),
+    }
 
 
 def _add_boq_item(
@@ -310,33 +459,111 @@ def _add_boq_item(
     payload: dict,
     source_quality: str,
     size_source: str | None,
+    *,
+    source: dict | None = None,
+    confidence_status: str | None = None,
+    confidence_score: float | None = None,
+    labor_payload: dict | None = None,
 ) -> None:
-    boq = compute_boq_item(quantity, material_name, db)
-    if boq.get("unpriced"):
-        payload["unpriced"] = True
+    """Persist one BOQ row.
+
+    Material rows price through the catalog (unpriced-flag on gaps). Labor
+    rows (``labor_payload`` set) price via ``compute_labor_cost`` with the
+    same flag pattern and stamp ``rate_source`` into the derivation payload.
+    """
+    unit_price: float | None
+    total_cost_value: float | None
+    if labor_payload is not None:
+        costing = compute_labor_cost(
+            db,
+            labor_payload.get("category"),
+            float(quantity),
+            labor_payload.get("hourly_rate"),
+        )
+        unit_price = costing["unit_rate"]
+        total_cost_value = costing["total_cost"]
+        if costing["unpriced"]:
+            payload["unpriced"] = True
+        payload["labor"] = {
+            "category": labor_payload.get("category"),
+            "rate_source": costing["rate_source"],
+        }
+        payload.pop("category", None)
+        payload.pop("hourly_rate", None)
+    else:
+        boq = compute_boq_item(quantity, material_name, db)
+        unit_price = boq.get("unit_price")
+        total_cost_value = boq.get("total_cost")
+        if boq.get("unpriced"):
+            payload["unpriced"] = True
     item = BoqItem(
         measurement_id=measurement.id,
         estimate_id=estimate.id,
         quantity=quantity,
-        unit_cost=float(boq.get("unit_price") or 0.0),
-        total_cost=float(boq.get("total_cost") or 0.0),
+        unit_cost=float(unit_price or 0.0),
+        total_cost=float(total_cost_value or 0.0),
         derivation_json=json.dumps(payload),
         size_source=size_source,
+        # Click-through region + live tier, mirroring the API response
+        # (T3-review ruling): a replayed estimate reads the same tiers a
+        # fresh run showed, never the row-level MEASURED status.
+        source_bbox_json=(json.dumps(source) if source else None),
+        confidence_status=confidence_status,
+        confidence_score=confidence_score,
     )
     db.add(item)
+
+
+def _set_estimate_totals(db: OrmSession, estimate: Estimate) -> None:
+    """Classify persisted rows into material vs labor totals (spec v3 §7.14).
+
+    grand == Σ priced material + Σ priced labor. Unpriced rows — flagged in
+    derivation_json — contribute to neither total (their cost columns hold
+    0.0 only because the schema is non-nullable).
+    """
+    rows = (
+        db.query(BoqItem)
+        .filter(BoqItem.estimate_id == estimate.id)
+        .with_entities(BoqItem.total_cost, BoqItem.derivation_json)
+        .all()
+    )
+    material_total = 0.0
+    labor_total = 0.0
+    for total_cost, raw_derivation in rows:
+        value = float(total_cost or 0.0)
+        try:
+            derivation = json.loads(raw_derivation) if raw_derivation else {}
+        except ValueError:
+            derivation = {}
+        is_priced_labor = (
+            isinstance(derivation, dict)
+            and "labor" in derivation
+            and not derivation.get("unpriced")
+        )
+        if is_priced_labor:
+            labor_total += value
+        else:
+            material_total += value
+    estimate.total_material_cost = round(material_total, 2)
+    estimate.total_labor_cost = round(labor_total, 2)
+    estimate.total_cost = round(material_total + labor_total, 2)
 
 
 def persist_extraction(
     db: OrmSession,
     project_id: uuid.UUID | None,
     extraction: SheetExtraction,
+    pdf_bytes: bytes | None = None,
 ) -> uuid.UUID:
     """Persist one sheet extraction; returns the new estimate id.
 
     Replace strategy: an existing Sheet with the same name under the project
     has its measurements/boq_items/cascade children deleted before the fresh
     rows are inserted. Creates ``Project(name="Default Project")`` when
-    ``project_id`` is None.
+    ``project_id`` is None. When ``pdf_bytes`` is given, the exact uploaded
+    drawing is stored at ``data/uploads/<estimate_id>.pdf`` and its path
+    recorded on ``Estimate.source_pdf_path`` (served by
+    ``GET /api/estimates/{id}/file``).
     """
     project = _resolve_project(db, project_id)
 
@@ -427,9 +654,24 @@ def persist_extraction(
 
     db.flush()  # assign route/component ids before measurements reference them
 
-    estimate = Estimate(project_id=project.id)
+    # Estimate-level provenance (spec v3 conformance): how the scale was
+    # obtained + the run's DataQuality counters with the resolved scale_str
+    # folded into the same JSON document.
+    estimate = Estimate(
+        project_id=project.id,
+        scale_status=extraction.scale_status,
+        data_quality_json=json.dumps(
+            {"scale_str": extraction.scale_str, **(extraction.data_quality or {})}
+        ),
+    )
     db.add(estimate)
     db.flush()
+
+    if pdf_bytes:
+        _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+        pdf_path = _UPLOADS_DIR / f"{estimate.id}.pdf"
+        pdf_path.write_bytes(pdf_bytes)
+        estimate.source_pdf_path = str(pdf_path)
 
     for row, route_row in zip(extraction.routes, route_rows):
         _persist_route_boq(
@@ -443,6 +685,8 @@ def persist_extraction(
             extraction.rule_version,
             (row.size_json or {}).get("source"),
             row.layer_ocg,
+            scale_status=extraction.scale_status,
+            source=_source_region(row.page, row.bbox),
         )
 
     counts: dict[str | None, int] = {}
@@ -465,6 +709,7 @@ def persist_extraction(
                 row.confidence_status,
                 extraction.source_quality,
                 extraction.rule_version,
+                source=_source_region(row.page, row.bbox),
             )
         consumed[key] += 1
 
@@ -475,14 +720,8 @@ def persist_extraction(
             annotation.route_id = route_rows[row.route_index].id
     db.flush()
 
-    total_material = (
-        db.query(BoqItem)
-        .filter(BoqItem.estimate_id == estimate.id)
-        .with_entities(BoqItem.total_cost)
-        .all()
-    )
-    estimate.total_material_cost = round(sum(float(t[0] or 0.0) for t in total_material), 2)
-    estimate.total_labor_cost = 0.0
-    estimate.total_cost = estimate.total_material_cost
+    # Totals split material vs labor; unpriced rows contribute to neither
+    # (spec v3 §7.14 — the flag, never a $0 price, reports the gap).
+    _set_estimate_totals(db, estimate)
     db.commit()
     return estimate.id

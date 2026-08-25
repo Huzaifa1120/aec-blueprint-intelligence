@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ForeignKey, String, Uuid
+from sqlalchemy import ForeignKey, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -47,6 +47,14 @@ class BoqItem(Base):
     # JSON text: {formula|gauge_lookup, inputs, rule_name, rule_version}
     size_source: Mapped[str | None] = mapped_column(String(20), default=None)
     # schedule|label|geometry|assumed
+    source_bbox_json: Mapped[str | None] = mapped_column(Text, default=None)
+    # JSON text: {"page": int, "bbox": [x0, y0, x1, y1]} in PDF points — the
+    # click-through region the live response carried for this row
+    confidence_status: Mapped[str | None] = mapped_column(String(20), default=None)
+    # Live tier at persist time (DERIVED|ASSUMED) — mirrors the API response
+    # (T3-review ruling); NULL on legacy rows, payload falls back to the
+    # measurement row status.
+    confidence_score: Mapped[float | None] = mapped_column(default=None)
 
     measurement: Mapped[Measurement] = relationship(back_populates="boq_items")
     estimate: Mapped["Estimate"] = relationship(back_populates="boq_items")
@@ -60,6 +68,11 @@ class Estimate(Base):
     total_material_cost: Mapped[float] = mapped_column(default=0.0)
     total_labor_cost: Mapped[float] = mapped_column(default=0.0)
     total_cost: Mapped[float] = mapped_column(default=0.0)
+    data_quality_json: Mapped[str | None] = mapped_column(Text, default=None)
+    # JSON text: DataQuality counters for the run that produced this estimate
+    scale_status: Mapped[str | None] = mapped_column(String(20))
+    # parsed | assumed
+    source_pdf_path: Mapped[str | None] = mapped_column(String(500))
 
     project: Mapped["Project"] = relationship(back_populates="estimates")
     boq_items: Mapped[list[BoqItem]] = relationship(

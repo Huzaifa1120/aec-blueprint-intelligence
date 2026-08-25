@@ -16,8 +16,11 @@ fixtures — no model output anywhere (trap compliance).
 
 from __future__ import annotations
 
+import io
+import json
 import os
 
+import openpyxl
 import pymupdf
 import pytest
 from fastapi.testclient import TestClient
@@ -27,7 +30,9 @@ from app.db.models.estimate import BoqItem, Estimate, Measurement
 from app.db.models.extraction import Layer
 from app.db.models.geometry import Component, Route
 from app.db.models.project import Drawing, Project, Sheet
+from app.db.models.review import ReviewAction, ReviewSession
 from app.db.session import get_engine
+from app.narration.providers import TemplateNarrator, verify_no_invented_numbers
 from tests.fixtures.make_hvac_fixture import build_hvac_fixture
 
 
@@ -511,3 +516,132 @@ def test_unmapped_pricing_guard_holds_even_with_rule(monkeypatch):
         assert db.query(Measurement).count() == measurements_before
         assert db.query(BoqItem).count() == boq_before
         db.rollback()  # keep the shared dev DB clean
+
+
+# ---------------------------------------------------------------------------
+# Task 13: exports + narration disclose data quality / corrections honestly
+# ---------------------------------------------------------------------------
+def test_xlsx_export_carries_data_quality_and_corrections(client):
+    """XLSX export lists each NONZERO dq counter under a Data Quality section
+    and appends a corrections annex row per linked review action (item,
+    action, reason, corrected_value, date) — zero counters never appear."""
+    with OrmSession(get_engine()) as db:
+        project = db.query(Project).filter_by(name="Default Project").first()
+        if project is None:
+            project = Project(name="Default Project")
+            db.add(project)
+            db.flush()
+        estimate = Estimate(
+            project_id=project.id,
+            total_material_cost=10.0,
+            total_cost=10.0,
+            scale_status="parsed",
+            data_quality_json=json.dumps(
+                {"scale_str": "1:100", "dropped_routes": 2, "unmapped_count": 0}
+            ),
+        )
+        db.add(estimate)
+        db.flush()
+        measurement = Measurement(
+            source_sheet="dq-sheet",
+            source_region="region",
+            measurement_type="route_length",
+            raw_value=1.0,
+        )
+        db.add(measurement)
+        db.flush()
+        item = BoqItem(
+            measurement_id=measurement.id,
+            estimate_id=estimate.id,
+            quantity=1.0,
+            unit_cost=10.0,
+            total_cost=10.0,
+            derivation_json=json.dumps({"material_name": "duct_rect"}),
+        )
+        db.add(item)
+        review_session = ReviewSession(sheet_label="dq-sheet")
+        db.add(review_session)
+        db.flush()
+        action = ReviewAction(
+            session_id=review_session.id,
+            item_id=str(item.id),
+            action="correct",
+            confidence_tier="DERIVED",
+            boq_item_id=item.id,
+            reason="field fix",
+            corrected_value=12.5,
+        )
+        db.add(action)
+        db.commit()
+        estimate_id, measurement_id, session_id = (
+            estimate.id,
+            measurement.id,
+            review_session.id,
+        )
+
+    try:
+        response = client.get(f"/api/exports/estimates/{estimate_id}/export?format=xlsx")
+        assert response.status_code == 200, response.text
+        wb = openpyxl.load_workbook(io.BytesIO(response.content))
+        ws = wb.active
+        rows = [[cell.value for cell in row] for row in ws.iter_rows()]
+        labels = [row[0] for row in rows]
+
+        dq_idx = labels.index("Data Quality")
+        counter_rows = [row for row in rows[dq_idx + 1 :] if row[0] is not None and row != []]
+        # Only the nonzero counter is listed; unmapped_count == 0 stays out.
+        assert counter_rows[0][:2] == ["dropped_routes", 2]
+        assert all(row[0] != "unmapped_count" for row in counter_rows)
+
+        corr_idx = labels.index("Corrections")
+        header = rows[corr_idx + 1]
+        data_row = rows[corr_idx + 2]
+        assert header[:3] == ["Item / Material", "Action", "Reason"]
+        assert data_row[0] == "duct_rect"
+        assert data_row[1] == "correct"
+        assert data_row[2] == "field fix"
+        assert data_row[3] == 12.5
+        assert data_row[4]
+    finally:
+        with OrmSession(get_engine()) as db:
+            for obj in (
+                db.get(Estimate, estimate_id),
+                db.get(Measurement, measurement_id),
+                db.get(ReviewSession, session_id),
+            ):
+                if obj is not None:
+                    db.delete(obj)
+            db.commit()
+
+
+def test_narration_verbatimism_holds_with_assumptions_section(client, hvac_run):
+    """Template narration gains an Assumptions & Data Quality section (assumed
+    scale notice + nonzero counters only) and the runtime verbatimism gate
+    still passes — every number traceable to the payload."""
+    boq = client.get(f"/api/estimates/{hvac_run['estimate_id']}/boq").json()
+
+    # Untouched persisted payload must keep passing the gate.
+    baseline = TemplateNarrator().narrate(boq)
+    verify_no_invented_numbers(baseline["narrative"], boq)
+
+    enriched = dict(boq)
+    enriched["scale"] = {"value": "1:100", "status": "assumed"}
+    enriched["data_quality"] = {
+        "scale_str": "1:100",
+        "dropped_routes": 3,
+        "unmapped_count": 0,
+        "degenerate_skipped": 1,
+    }
+    result = TemplateNarrator().narrate(enriched)
+    assert result["provider"] == "template"
+    narrative = result["narrative"]
+    assert "Assumptions & Data Quality" in narrative
+    assert "- dropped_routes: 3" in narrative
+    assert "- degenerate_skipped: 1" in narrative
+    assert "unmapped_count" not in narrative  # zero counters are not listed
+    verify_no_invented_numbers(narrative, enriched)
+
+    # Live endpoint wiring on the real payload.
+    r = client.get(f"/api/narration/estimates/{hvac_run['estimate_id']}")
+    assert r.status_code == 200, r.text
+    assert r.json()["provider"] == "template"

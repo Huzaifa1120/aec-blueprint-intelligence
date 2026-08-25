@@ -86,7 +86,7 @@ export function EstimateListPage() {
                         <td className="px-4 py-3">
                           <Link
                             href={`/estimates/${row.estimate_id}`}
-                            className="font-medium text-ink-black decoration-safety-amber decoration-2 underline-offset-4 hover:underline"
+                            className="font-medium text-ink-700 decoration-safety-amber decoration-2 underline-offset-4 hover:underline"
                           >
                             {row.project_name}
                           </Link>

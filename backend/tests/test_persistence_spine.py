@@ -56,8 +56,9 @@ def test_round_trip_and_replace():
     c = _client()
     body = c.get(f"/api/estimates/{est2}/boq").json()
     # One BOQ line per material of the single duct route: sheet metal
-    # (formula), duct fitting (linear_per_m constant), hanger kit (gauge).
-    assert len(body["routes"]) == 3
+    # (formula), duct fitting (linear_per_m constant), hanger kit (gauge) —
+    # plus one labor line per rule-with-labor (spec v3 §7.14).
+    assert len(body["routes"]) == 4  # contract change: labor lines 2026-08-25
     assert body["routes"][0]["length_m"] == 12.5
     assert body["routes"][0]["size_json"]["source"] == "label"
 

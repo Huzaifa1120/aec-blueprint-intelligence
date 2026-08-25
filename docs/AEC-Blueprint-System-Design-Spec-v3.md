@@ -7,6 +7,7 @@
 
 ## Changelog from v2
 
+- **2026-08-25: §7.3 layer-classification example aligned with shipped owner rulings (Phase 4): FIRE ALARM → fire_alarm discipline; M_SAUDI_RAIN DOWNPIPE → plumbing (counted storm-downpipe kit); NCS P-/FP-/FA- families added.**
 - **Input Quality Gate added (§7.2, new).** v2 implicitly treated layer-rich vector PDFs (like the sample) as the expected case. Real-world CAD-to-PDF practice says otherwise: building-permit portals commonly require flattening before submission, generic print-to-PDF drivers strip layers by default, and some firms flatten deliberately to prevent exactly the kind of automated takeoff this system does. The sample file is now explicitly framed as the **best case**, not the median case (§5.5), and the pipeline has an explicit step to detect and react to degraded input instead of silently running a worse pipeline.
 - **Raster/CV fallback engine rewritten (§7.7).** Ultralytics YOLOv8 required an Enterprise License even for purely internal, non-distributed company use under AGPL-3.0 — a real, unbudgeted legal/cost exposure that was sitting undisclosed in v2's tech stack table. Removed as the default. Replaced with a two-technique split: classical CV template/feature matching (OpenCV, no license, no training) for legend-based symbol counting, and Detectron2 (Apache-2.0) reserved for the one sub-problem — architectural region segmentation — that actually benefits from a trained model.
 - **Clustering algorithm changed (§7.4).** DBSCAN's density parameters needed per-drawing tuning and produced boundaries that are hard to explain to a human reviewer. Replaced with deterministic distance-threshold clustering (union-find), with the threshold derived from the sheet's own calibrated legend-symbol size — no tuning knob, plain-language justification for every cluster.
@@ -180,9 +181,19 @@ Enumerate every OCG on the sheet, classify by regex against a human-editable con
 layer_classification_rules:
   - pattern: '^(M_SAUDI_(WALL|DOOR|STAIRS|ROOM|AREAS)|M-PART-GLZW)'
     discipline: architectural
-  - pattern: '^(E-|ADO |FIRE ALARM|NORMAL TRAY|access control)'
+  - pattern: '^(E-|ADO |NORMAL TRAY|access control)'
     discipline: electrical
-  - pattern: '^M_SAUDI_(WATER_INSULATING|VENT_identy|RAIN)'
+  - pattern: '^(P-)'
+    discipline: plumbing
+  - pattern: '^(FP-)'
+    discipline: fire_protection
+  - pattern: '^(FA-)'
+    discipline: fire_alarm
+  - pattern: '^FIRE ALARM'
+    discipline: fire_alarm
+  - pattern: '^M_SAUDI_RAIN DOWNPIPE'
+    discipline: plumbing
+  - pattern: '^M_SAUDI_(WATER_INSULATING|VENT_identy)'
     discipline: envelope
   - pattern: '^M_SAUDI_(MAT|METAL|PATT|NPLT|PRPT|AGRAF|DOT|ACCESSORY|HIDDEN)'
     discipline: material_rendering   # non-structural
@@ -274,6 +285,7 @@ Pure, unit-tested arithmetic. Zero AI involvement.
 ### 7.13 Human review UI — instrumented in v3
 Overlay every extraction on the original drawing; click-through to source; bulk-accept high-confidence `MEASURED` items; filter/group by discipline, layer-classification confidence, and now also by `source_quality`.
 **New:** instrument and log average review time per sheet and per confidence tier, from Stage 0 onward. This isn't cosmetic — it's the direct measure of whether the system is actually saving time over manual takeoff, which is the entire commercial case for building it. See §15.
+**Implementation note (2026-08-25):** correction annotations persist as nullable columns (`boq_item_id`, `reason`, `corrected_value`) on the existing `review_actions` table rather than a separate `review_corrections` table — annotation-only semantics unchanged (§15).
 
 ### 7.14 Output generation
 BOQ, BOM, LLM-narrated scope of work (from structured data, never raw images), workforce/labor estimate. Export: JSON, XLSX, PDF.

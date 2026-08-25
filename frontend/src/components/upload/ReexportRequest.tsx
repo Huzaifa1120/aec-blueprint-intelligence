@@ -63,7 +63,7 @@ export function ReexportRequest({ drawingId }: ReexportRequestProps) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="overflow-hidden rounded-2xl border border-steel bg-paper"
+      className="overflow-hidden rounded-2xl border border-border bg-card"
       noValidate
     >
       <HazardStripe className="opacity-15" />

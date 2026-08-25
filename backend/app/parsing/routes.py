@@ -33,6 +33,8 @@ class RouteGeo(TypedDict):
     confidence_status: str  # "MEASURED"
     confidence_score: float  # 1.0 = measured directly from vector
     source_path_ids: List[str]
+    bbox: Tuple[float, float, float, float]  # (x0, y0, x1, y1) around the polyline
+    page: int  # 0-indexed source page of the first member path
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +76,9 @@ def compute_length_meters(
     try:
         denominator = float(scale.split(":")[1])
     except (IndexError, ValueError):
-        denominator = 1.0  # fallback: assume 1:1
+        # Spec v3 §7.4: never assume 1:1. Unparseable == missing → 1:100,
+        # and the pipeline stamps such runs scale_status="assumed".
+        denominator = 100.0
 
     # corrected 2026-08-22: pt→paper-mm→real-m conversion
     # (was treating pt as meters; physically impossible outputs,
@@ -211,6 +215,7 @@ def measure_routes(
     raw_drawings: List[Dict],
     scale: str,
     route_layer_names: Tuple[str, ...] = ("CONDUIT", "CABLE_TRAY", "PIPE"),
+    stats: Optional[Dict[str, int]] = None,
 ) -> List[RouteGeo]:
     """Measure cable trunk / conduit lengths from clustered route-layer paths.
 
@@ -218,6 +223,11 @@ def measure_routes(
     route candidate: with union-find clustering (spec v3 §7.4) there is no
     noise concept, and tray/conduit polylines legitimately form single-path
     clusters. Dedup by source_path_ids still applies downstream.
+
+    Route candidates that cannot produce a measurable polyline (no
+    extractable points, or fewer than 2 distinct points — e.g. a zero-length
+    vent stub) are skipped and tallied in ``stats["degenerate_skipped"]``
+    when a stats dict is supplied, so they never vanish silently.
 
     For each route-layer cluster, extract the paths' polyline,
     compute length using the detected scale, and return RouteGeo objects.
@@ -228,6 +238,8 @@ def measure_routes(
     - Source path IDs preserved for traceability
     - confidence_status default "MEASURED", score 1.0
     """
+    if stats is None:
+        stats = {}
     measured_routes: List[RouteGeo] = []
 
     # Build a lookup: path_id → drawing path dict
@@ -278,17 +290,22 @@ def measure_routes(
                     polyline_parts.append((px, py))
 
         if len(polyline_parts) < 2:
+            stats["degenerate_skipped"] = stats.get("degenerate_skipped", 0) + 1
             continue
         # Degenerate cluster (all points identical, e.g. a zero-length vent
         # stub): fewer than 2 DISTINCT points is no measurable route — skip
         # instead of emitting a qty-0 BOQ row.
         if len(set(polyline_parts)) < 2:
+            stats["degenerate_skipped"] = stats.get("degenerate_skipped", 0) + 1
             continue
 
         # No coordinate sorting here: a lexicographic (x, y) sort destroys
         # multi-segment continuity and yields zig-zag, non-path lengths.
         # The chained items-order sequence above IS the drawing order.
         length_m = compute_length_meters(polyline_parts, scale)
+
+        xs = [pt[0] for pt in polyline_parts]
+        ys = [pt[1] for pt in polyline_parts]
 
         route: RouteGeo = {
             "id": str(uuid.uuid4()),
@@ -299,6 +316,10 @@ def measure_routes(
             "confidence_status": "MEASURED",
             "confidence_score": 1.0,
             "source_path_ids": member_ids,
+            # Click-through provenance (spec v3 §7.12): region around the
+            # measured run + the page it was drawn on (0-indexed).
+            "bbox": (min(xs), min(ys), max(xs), max(ys)),
+            "page": int(member_path.get("page_number") or 1) - 1,
         }
 
         measured_routes.append(route)

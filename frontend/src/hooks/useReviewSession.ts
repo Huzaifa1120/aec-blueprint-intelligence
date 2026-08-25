@@ -30,6 +30,9 @@ interface ActionPayload {
   item_id: string
   action: string
   confidence_tier: string
+  boq_item_id?: string
+  reason?: string
+  corrected_value?: number
 }
 
 export function useReviewSession(estimateId: string | undefined) {
@@ -72,6 +75,9 @@ export function useReviewSession(estimateId: string | undefined) {
         action: action.action,
         confidence_tier: action.confidence_tier,
       }
+      if (action.boq_item_id !== undefined) payload.boq_item_id = action.boq_item_id
+      if (action.reason !== undefined) payload.reason = action.reason
+      if (action.corrected_value !== undefined) payload.corrected_value = action.corrected_value
       await apiPost(`/api/review/sessions/${sid}/actions`, payload)
       setReviewedCount((n) => n + 1)
     },

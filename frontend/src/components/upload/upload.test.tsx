@@ -69,6 +69,12 @@ describe("DropZone", () => {
     await waitFor(() => expect(onFile).toHaveBeenCalledWith(file))
     expect(screen.queryByText(WRONG_FILE_TYPE_COPY)).not.toBeInTheDocument()
   })
+
+  it("applies a custom className to the drop area", () => {
+    const onFile = vi.fn()
+    render(<DropZone onFile={onFile} className="min-h-64" />)
+    expect(screen.getByTestId("dropzone")).toHaveClass("min-h-64")
+  })
 })
 
 describe("QualityGateBadge", () => {

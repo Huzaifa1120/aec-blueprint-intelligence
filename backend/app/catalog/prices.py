@@ -10,9 +10,11 @@ calculation.
 
 from __future__ import annotations
 
+import logging
 from typing import List, Dict, Any, Optional
 from decimal import Decimal, ROUND_HALF_UP
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.db.models.catalog import Price as PriceModel, LaborRate as LRModel
@@ -47,6 +49,85 @@ def labor_cost(labor_hours: float, hourly_rate: float) -> float:
     """Labor cost = labor_hours * hourly_rate."""
     result = Decimal(str(labor_hours)) * Decimal(str(hourly_rate))
     return float(result.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+# Process-level latch so the drift warning logs once, not per BOQ line.
+_LACKS_LABOR_RATES_TABLE = False
+
+
+def latest_labor_rate(db_session: Session, category: str) -> Optional[float]:
+    """Latest catalog hourly rate for one labor category.
+
+    Ordered by ``effective_from`` descending; None-tolerant so rates without
+    a date still serve when they are the only row. A deployment whose
+    migration chain predates the drifted ``labor_rates`` table (known gotcha)
+    degrades to "no catalog rate" with a warning — resolution then falls to
+    YAML/unpriced instead of failing the run. ONLY that exact condition
+    degrades: SQLite surfaces it as ``OperationalError("no such table: …")``
+    and any other failure (lock, connection loss, …) propagates loudly.
+    """
+    from datetime import date as _date
+
+    global _LACKS_LABOR_RATES_TABLE
+    try:
+        rates = db_session.query(LRModel).filter(LRModel.category == category).all()
+    except OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise  # transient/unknown DB fault — never misread as "no table"
+        if not _LACKS_LABOR_RATES_TABLE:
+            _LACKS_LABOR_RATES_TABLE = True
+            logging.getLogger(__name__).warning(
+                "labor_rates table is missing from this database "
+                "(model/migration drift) -- falling back to YAML hourly rates"
+            )
+        return None
+    if not rates:
+        return None
+    dated = sorted(rates, key=lambda r: r.effective_from or _date.min, reverse=True)
+    hourly = dated[0].hourly_rate
+    return float(hourly) if hourly is not None else None
+
+
+def compute_labor_cost(
+    db_session: Session,
+    category: Optional[str],
+    hours: float,
+    yaml_hourly_rate: Optional[float],
+) -> Dict[str, Any]:
+    """Resolve a labor rate and price ``hours`` of it.
+
+    Rate resolution order: catalog LaborRate(category, latest) > YAML
+    ``hourly_rate`` > unpriced. Returns::
+
+        {"unit_rate": float | None,
+         "total_cost": float,        # 0.0 when unpriced — never a fake price
+         "unpriced": bool,
+         "rate_source": "catalog" | "yaml" | None}
+
+    Rounding reuses the pure ``labor_cost`` Decimal rule.
+    """
+    rate: Optional[float] = None
+    source: Optional[str] = None
+    if category:
+        rate = latest_labor_rate(db_session, category)
+        if rate is not None:
+            source = "catalog"
+    if rate is None and yaml_hourly_rate is not None:
+        rate = float(yaml_hourly_rate)
+        source = "yaml"
+    if rate is None:
+        return {
+            "unit_rate": None,
+            "total_cost": 0.0,
+            "unpriced": True,
+            "rate_source": None,
+        }
+    return {
+        "unit_rate": rate,
+        "total_cost": labor_cost(hours, rate),
+        "unpriced": False,
+        "rate_source": source,
+    }
 
 
 def total_cost(

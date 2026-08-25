@@ -7,4 +7,6 @@ bom:
   door_controller: 0.5
 labor:
   installation_hours: 2.5
+  hourly_rate: 45.00
+  category: electrical
 waste_factor: 0.10

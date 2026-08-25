@@ -22,6 +22,9 @@ export interface BoqLine {
   unpriced: boolean
   confidence_status: ConfidenceStatus
   size_source: string | null
+  source_quality?: SourceQuality
+  item_id?: string
+  source?: { page: number; bbox: [number, number, number, number] } | null
 }
 
 export interface BoqRouteLine extends BoqLine {
@@ -50,6 +53,8 @@ export interface EstimateBoq {
   totals: BoqTotals
   routes: BoqRouteLine[]
   materials: BoqLine[]
+  scale?: { value: string; status: "detected" | "assumed" } | null
+  data_quality?: Record<string, number> | null
 }
 
 export interface BoqSourceRegion {

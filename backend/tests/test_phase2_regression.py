@@ -527,8 +527,14 @@ def test_ep3_e2e_pipeline_validation_on_sample(tmp_path, monkeypatch):
     # E1: vector classification -> pipeline ran with status "ok"
     assert body["status"] == "ok", f"Pipeline failed: {body}"
 
-    # E2: scale read from sheet, never assumed (sample title block = 1:100)
-    assert body["scale"] == "1:100", f"Expected 1:100, got {body['scale']}"
+    # E2: scale block contract (spec v3 §7.4 honesty). Probe 2026-08-25: the
+    # MMC title block carries a bare "SCALE" label and no ratio token anywhere
+    # in its extracted text, so this run must stamp value "1:100" with status
+    # "assumed" — the old silent default string could not tell the two apart.
+    # Denominator stays 100.0 either way; quantities are unchanged.
+    assert body["scale"] == {"value": "1:100", "status": "assumed"}, (
+        f"Expected assumed 1:100 scale block, got {body['scale']}"
+    )
 
     # E3: routes measured for mapped route layers (CONDUIT / CABLE_TRAY)
     assert body["routes_measured"] > 0, "Expected measured routes on the sheet"

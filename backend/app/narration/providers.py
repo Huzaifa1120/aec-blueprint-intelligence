@@ -160,6 +160,25 @@ class TemplateNarrator:
                 label = item.get("material_name") or "unnamed item"
                 lines.append(f"- {label}: UNPRICED - review required.")
 
+        scale = boq_payload.get("scale") or {}
+        counters = [
+            (name, value)
+            for name, value in (boq_payload.get("data_quality") or {}).items()
+            if isinstance(value, int) and not isinstance(value, bool) and value != 0
+        ]
+        if scale.get("status") == "assumed" or counters:
+            lines.extend(["", "Assumptions & Data Quality"])
+            if scale.get("status") == "assumed":
+                scale_value = scale.get("value")
+                if scale_value:
+                    lines.append(
+                        f"- Scale assumed ({scale_value}): verify against the source drawing."
+                    )
+                else:
+                    lines.append("- Scale assumed: no scale parsed from the drawing.")
+            for name, count in counters:
+                lines.append(f"- {name}: {_fmt(count)}")
+
         return {"narrative": "\n".join(lines), "provider": self.name}
 
 

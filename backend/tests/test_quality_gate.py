@@ -138,6 +138,9 @@ def test_boq_line_applies_degraded_confidence_multiplier():
         degraded = _boq_line("lighting_outlet", "Lamp", 2.0, "MEASURED", ["p1"], session,
                              source_quality="degraded_vector")
     assert normal["source_quality"] == "layered_vector"
-    assert normal["confidence_score"] == 1.0
+    # contract change: spec conformance 2026-08-25 — BOQ lines are DERIVED (0.8), never MEASURED (1.0)
+    assert normal["confidence_status"] == "DERIVED"
+    assert normal["confidence_score"] == 0.8
     assert degraded["source_quality"] == "degraded_vector"
-    assert abs(degraded["confidence_score"] - 0.8) < 1e-9
+    # contract change: spec conformance 2026-08-25 — degraded multiplier composes: 0.8 * 0.8 = 0.64
+    assert abs(degraded["confidence_score"] - 0.64) < 1e-9

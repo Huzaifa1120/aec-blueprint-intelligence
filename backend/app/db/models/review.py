@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, String, Uuid, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -36,6 +36,9 @@ class ReviewAction(Base):
     item_id: Mapped[str] = mapped_column(String(100))
     action: Mapped[str] = mapped_column(String(20))
     confidence_tier: Mapped[str] = mapped_column(String(20))
+    boq_item_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("boq_items.id"))
+    reason: Mapped[str | None] = mapped_column(Text)
+    corrected_value: Mapped[float | None]
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     session: Mapped[ReviewSession] = relationship(back_populates="actions")

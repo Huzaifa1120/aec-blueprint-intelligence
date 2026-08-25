@@ -4,6 +4,8 @@ Single landscape-A4 document: title, one table row per BOQ line with the
 same provenance columns as the XLSX writer (material, quantity, unit,
 confidence_status, size_source, unpriced flag), then a verbatim totals
 block. Unpriced lines carry the review-required label instead of a price.
+After the totals: Data Quality paragraphs for each NONZERO run counter and
+a corrections annex paragraph per linked review action.
 """
 
 from __future__ import annotations
@@ -70,6 +72,34 @@ def _line_cells(line: dict) -> list[str]:
         str(line.get("confidence_status") or ""),
         "" if size_source is None else str(size_source),
     ]
+
+
+def _nonzero_counters(data_quality: object) -> list[tuple[str, int]]:
+    """Only counters that actually fired are disclosed; scale_str is a string
+    and zero counters stay out."""
+    if not isinstance(data_quality, dict):
+        return []
+    return [
+        (name, value)
+        for name, value in data_quality.items()
+        if isinstance(value, int) and not isinstance(value, bool) and value != 0
+    ]
+
+
+def _correction_text(correction: dict) -> str:
+    parts: list[str] = []
+    label = correction.get("material_name") or correction.get("item_id")
+    if label:
+        parts.append(str(label))
+    if correction.get("action"):
+        parts.append(f"action {correction['action']}")
+    if correction.get("reason"):
+        parts.append(f"reason {correction['reason']}")
+    if correction.get("corrected_value") is not None:
+        parts.append(f"corrected value {_format_number(correction['corrected_value'])}")
+    if correction.get("date"):
+        parts.append(f"date {correction['date']}")
+    return "- " + "; ".join(parts) + "."
 
 
 def render(rows: dict) -> bytes:
@@ -141,6 +171,20 @@ def render(rows: dict) -> bytes:
             )
         )
         story.append(totals_table)
+
+    counters = _nonzero_counters(rows.get("data_quality"))
+    if counters:
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("Data Quality", styles["Heading2"]))
+        for name, count in counters:
+            story.append(Paragraph(f"- {name}: {_format_number(count)}", styles["Normal"]))
+
+    corrections = rows.get("corrections") or []
+    if corrections:
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("Corrections", styles["Heading2"]))
+        for correction in corrections:
+            story.append(Paragraph(_correction_text(correction), styles["Normal"]))
 
     doc.build(story)
     return buffer.getvalue()

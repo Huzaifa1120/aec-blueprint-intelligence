@@ -83,6 +83,57 @@
   --radius: 0.25rem;
 }
 
+.dark {
+  /* Surfaces: deep warm ink ramp */
+  --canvas: #12130f;
+  --surface: #12130f;
+  --background: var(--canvas);
+  --foreground: var(--paper);
+  --card: #1a1b15;
+  --card-foreground: var(--paper);
+  --popover: #22231b;
+  --popover-foreground: var(--paper);
+  --secondary: #1a1b15;
+  --secondary-foreground: var(--paper);
+  --muted: #1c1d16;
+  --muted-foreground: #a8b0ab;
+  --border: #2e2f27;
+  --input: #3a3b32;
+  --ring: var(--safety-amber);
+
+  /* Extended palette, dark equivalents */
+  --surface-dim: #23241d;
+  --surface-container: #1a1b15;
+  --surface-container-high: #22231b;
+  --outline: #3a3b32;
+  --outline-variant: #2e2f27;
+  --green-tint: #1f7a5326;
+  --ink-muted: #a8b0ab33;
+
+  /* Ink text scale inverts for dark canvas */
+  --ink-900: var(--paper);
+  --ink-700: #e8e7e0;
+  --ink-500: #a8b0ab;
+  --ink-300: #77786f;
+
+  /* Confidence tiers brighten for contrast */
+  --tier-measured: #34a06e;
+  --tier-derived: #f7b944;
+  --tier-assumed: #e0604f;
+  --signal-success: var(--tier-measured);
+  --signal-warning: var(--tier-derived);
+  --signal-error: var(--tier-assumed);
+  --signal-info: #a8b0ab;
+  --raster-flag: #a8b0ab;
+  --guard-green: var(--tier-measured);
+  --destructive: var(--tier-assumed);
+
+  /* Accent washes stay amber-translucent */
+  --accent: var(--green-tint);
+  --accent-foreground: var(--tier-measured);
+  --accent-wash: #f5a6231f;
+}
+
 @theme inline {
   /* shadcn semantic utility mapping */
   --color-background: var(--background);

@@ -6,6 +6,12 @@
     ``totals``, flat ``routes`` / ``materials`` line lists. Values are copied
     verbatim from persisted rows — no arithmetic happens at read time.
 
+``GET /api/estimates/{id}/file``
+    Serves the original uploaded drawing stored at persist time under
+    ``backend/data/uploads/<estimate_id>.pdf`` (path recorded on
+    ``Estimate.source_pdf_path``); 404s cleanly for legacy estimates with no
+    stored file.
+
 ``GET /api/estimates/{id}/replay``
     Recomputes every stored BoqItem quantity from its recorded derivation
     and compares with the persisted quantity within ``1e-6 * max(1, qty)``:
@@ -37,10 +43,11 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session as OrmSession
 
 from app.assembly.formulas import (
@@ -170,6 +177,26 @@ def get_estimate_boq(
     if estimate is None:
         raise HTTPException(status_code=404, detail="estimate not found")
     return payload_from_estimate(estimate)
+
+
+@router.get("/{estimate_id}/file", summary="The original uploaded drawing (PDF)")
+def get_estimate_file(
+    estimate_id: uuid.UUID,
+    db: OrmSession = Depends(get_db),
+):
+    """Serve the PDF stored at persist time for the frontend viewer.
+
+    Reads only ``estimate.source_pdf_path`` as recorded — no user path input
+    exists, so there is no traversal surface. Legacy estimates persisted
+    before Task 9 have no stored path and 404 cleanly.
+    """
+    estimate = db.get(Estimate, estimate_id)
+    if estimate is None or not estimate.source_pdf_path:
+        raise HTTPException(status_code=404, detail="Source file not stored for this estimate")
+    path = Path(estimate.source_pdf_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Source file missing on disk")
+    return FileResponse(path, media_type="application/pdf", filename=path.name)
 
 
 # ---------------------------------------------------------------------------
