@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     database_url: str = "sqlite:///./aec.db"
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:3000", "https://aec-blueprint-intelligence.vercel.app"]
     log_level: str = "INFO"
 
     degraded_min_ocgs: int = 3
