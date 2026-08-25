@@ -23,9 +23,10 @@ export function validateDrawingFile(file: File): string | null {
 export interface DropZoneProps {
   onFile: (file: File) => void
   disabled?: boolean
+  className?: string
 }
 
-export function DropZone({ onFile, disabled = false }: DropZoneProps) {
+export function DropZone({ onFile, disabled = false, className }: DropZoneProps) {
   const [rejectionCopy, setRejectionCopy] = useState<string | null>(null)
 
   const onDrop = useCallback(
@@ -58,13 +59,21 @@ export function DropZone({ onFile, disabled = false }: DropZoneProps) {
         data-testid="dropzone"
         className={cn(
           "flex min-h-48 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-8 text-center outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+          className,
           isDragActive && !isDragReject && "border-primary bg-primary/5",
           isDragReject && "border-error bg-error/5",
           disabled && "pointer-events-none opacity-60",
         )}
       >
         <input {...getInputProps()} />
-        <UploadCloud className="size-6 text-ink-300" aria-hidden="true" />
+        <UploadCloud
+          className={cn(
+            "size-6 text-ink-300 transition-[color,transform] duration-(--duration-fast)",
+            isDragActive && !isDragReject && "-translate-y-0.5 text-primary",
+            isDragReject && "text-error",
+          )}
+          aria-hidden="true"
+        />
         <p className="text-sm text-ink-700">Drop a PDF here, or click to browse</p>
         <p className="text-xs text-ink-500">Accepts: PDF (vector or raster)</p>
       </div>
