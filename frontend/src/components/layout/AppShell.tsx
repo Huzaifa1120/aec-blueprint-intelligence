@@ -7,6 +7,7 @@ import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 import { GoggleLineDivider } from "@/components/ui/GoggleLineDivider"
 import { HazardStripe } from "@/components/ui/HazardStripe"
+import { ThemeToggle } from "./ThemeToggle"
 
 export interface AppShellProps {
   children: ReactNode
@@ -53,6 +54,7 @@ export function AppShell({ children, right }: AppShellProps) {
                 </Link>
               )
             })}
+            <ThemeToggle />
             {right}
           </nav>
         </div>
