@@ -12,6 +12,7 @@ import { QualityGateBadge } from "@/components/upload/QualityGateBadge"
 import { ReexportRequest } from "@/components/upload/ReexportRequest"
 import { GoggleLineDivider } from "@/components/ui/GoggleLineDivider"
 import { HazardStripe } from "@/components/ui/HazardStripe"
+import { ProtocolCard } from "@/components/ui/ProtocolCard"
 import { usePipelineRun } from "@/hooks/usePipelineRun"
 import { apiGet, apiPostForm } from "@/lib/api"
 import type { DrawingQualityCheck, QualityVerdict } from "@/types/drawing"
@@ -36,6 +37,24 @@ function newCorrelationId(): string {
     return digit.toString(16)
   })
 }
+
+const STEPS = [
+  {
+    n: "01",
+    title: "Quality gate",
+    body: "Layer and text metrics classify the sheet as layered, degraded, or raster before anything runs.",
+  },
+  {
+    n: "02",
+    title: "Deterministic takeoff",
+    body: "Geometry engines measure; rule assemblies derive quantities. No model ever guesses a number.",
+  },
+  {
+    n: "03",
+    title: "Human review",
+    body: "Every line item carries provenance and a confidence tier you can accept or correct.",
+  },
+] as const
 
 export default function UploadPage() {
   const router = useRouter()
@@ -117,78 +136,123 @@ export default function UploadPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto flex w-full max-w-xl flex-col gap-8 px-4 py-12">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-8">
         <section
           aria-labelledby="upload-heading"
-          className="overflow-hidden rounded-2xl bg-ink-black p-8 pt-0"
+          className="rise-in overflow-hidden rounded-2xl bg-ink-black p-8 pt-0 sm:p-10 sm:pt-0"
         >
-          <HazardStripe className="-mx-8 mb-6" />
+          <HazardStripe className="-mx-8 mb-6 sm:-mx-10" />
           <p className="label-mono text-safety-amber">Huzaifa AEC · Takeoff</p>
           <h1
             id="upload-heading"
-            className="mt-3 font-heading text-[32px] leading-[36px] tracking-[-0.01em] text-paper"
+            className="mt-3 font-heading text-[40px] leading-[44px] tracking-[-0.01em] text-paper md:text-[52px] md:leading-[54px]"
           >
             Upload a drawing to begin
           </h1>
-          <GoggleLineDivider className="mt-4 w-44" />
+          <p className="mt-4 max-w-xl text-sm leading-6 text-paper/70">
+            AI proposes · Geometry calculates · Rules derive · Humans approve. Every quantity traces
+            back to a deterministic measurement on your drawing.
+          </p>
+          <GoggleLineDivider className="mt-5 w-44" />
         </section>
 
-        <DropZone onFile={checkFile} disabled={phase === "checking"} />
-
-        {phase === "checking" && (
-          <p className="flex items-center gap-2 text-sm text-ink-500">
-            <LoadingSpinner />
-            Checking drawing structure...
-          </p>
-        )}
-
-        {(phase === "ready" || phase === "running") && (
-          <section aria-label="Quality check" className="flex flex-col gap-6">
-            <div className="flex items-center gap-3" aria-hidden="true">
-              <GoggleLineDivider className="flex-1 opacity-50" />
-              <span className="label-mono text-steel">Quality check</span>
-              <GoggleLineDivider className="flex-1 scale-x-[-1] opacity-50" />
+        <div className="rise-in rise-in-d1 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="flex flex-col gap-6">
+            <div className="rounded-lg border border-outline-variant bg-surface-container p-4">
+              <DropZone
+                onFile={checkFile}
+                disabled={phase === "checking"}
+                className="min-h-64 bg-canvas"
+              />
             </div>
 
-            {checkFailed ? (
-              <ErrorState description={QUALITY_CHECK_FAILED_COPY} />
-            ) : (
-              quality && (
-                <>
-                  <QualityGateBadge quality={quality} />
-
-                  {isDegraded && drawingId && <ReexportRequest drawingId={drawingId} />}
-                  {isDegraded && !continueAnyway && phase === "ready" && (
-                    <div>
-                      <Button variant="outline" onClick={() => setContinueAnyway(true)}>
-                        Continue anyway →
-                      </Button>
-                    </div>
-                  )}
-
-                  {showRunButton && (
-                    <div className="flex justify-end">
-                      <Button size="lg" onClick={startRun}>
-                        Run takeoff →
-                      </Button>
-                    </div>
-                  )}
-                </>
-              )
+            {phase === "checking" && (
+              <p className="flex items-center gap-2 text-sm text-ink-500 rise-in">
+                <LoadingSpinner />
+                Checking drawing structure...
+              </p>
             )}
-          </section>
-        )}
 
-        {phase === "running" && (
-          <p className="flex items-center gap-2 text-sm text-ink-500">
-            <LoadingSpinner />
-            Running takeoff…
-          </p>
-        )}
+            {(phase === "ready" || phase === "running") && (
+              <section aria-label="Quality check" className="flex flex-col gap-6 rise-in">
+                <div className="flex items-center gap-3" aria-hidden="true">
+                  <GoggleLineDivider className="flex-1 opacity-50" />
+                  <span className="label-mono text-steel">Quality check</span>
+                  <GoggleLineDivider className="flex-1 scale-x-[-1] opacity-50" />
+                </div>
 
-        {runFailureDetail && (
-          <ErrorState title="Couldn't complete the takeoff" description={runFailureDetail} />
-        )}
+                {checkFailed ? (
+                  <ErrorState description={QUALITY_CHECK_FAILED_COPY} />
+                ) : (
+                  quality && (
+                    <>
+                      <QualityGateBadge quality={quality} />
+
+                      {isDegraded && drawingId && <ReexportRequest drawingId={drawingId} />}
+                      {isDegraded && !continueAnyway && phase === "ready" && (
+                        <div>
+                          <Button variant="outline" onClick={() => setContinueAnyway(true)}>
+                            Continue anyway →
+                          </Button>
+                        </div>
+                      )}
+
+                      {showRunButton && (
+                        <div className="flex justify-end">
+                          <Button size="lg" onClick={startRun}>
+                            Run takeoff →
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  )
+                )}
+              </section>
+            )}
+
+            {phase === "running" && (
+              <p className="flex items-center gap-2 text-sm text-ink-500 rise-in">
+                <LoadingSpinner />
+                Running takeoff…
+              </p>
+            )}
+
+            {runFailureDetail && (
+              <ErrorState title="Couldn't complete the takeoff" description={runFailureDetail} />
+            )}
+          </div>
+
+          <aside>
+            <ProtocolCard
+              title="Pipeline contract"
+              className="rise-in"
+              rows={[
+                { label: "Verdict rule", value: "measured > derived > assumed" },
+                { label: "Input", value: "PDF ≤ 50 MB" },
+                { label: "Scale", value: "auto · flagged if assumed" },
+                { label: "Output", value: "BOQ → review" },
+                { label: "Quantities", value: "deterministic only", valueTone: "verified" },
+              ]}
+              footer={<p className="label-mono text-paper/50">No model ever outputs a number</p>}
+            />
+          </aside>
+        </div>
+
+        <ol className="rise-in rise-in-d2 grid gap-4 sm:grid-cols-3">
+          {STEPS.map((step) => (
+            <li
+              key={step.n}
+              className="rounded-lg border border-outline-variant bg-paper p-5 transition-colors hover:border-safety-amber"
+            >
+              <p className="label-mono text-steel">Step {step.n}</p>
+              <h2 className="mt-1 font-heading text-[17px] leading-[22px] text-ink-black">
+                {step.title}
+              </h2>
+              <GoggleLineDivider className="mt-2 w-16" />
+              <p className="mt-2 text-sm leading-[22px] text-ink-500">{step.body}</p>
+            </li>
+          ))}
+        </ol>
       </div>
     </AppShell>
   )
