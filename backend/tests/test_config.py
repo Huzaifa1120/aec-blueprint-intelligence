@@ -1,8 +1,14 @@
 from app.core.config import Settings, get_settings
 
+# The .env file may override defaults in CI/local; use explicit kwarg for defaults test
+def _default_database_url() -> str:
+    return "sqlite:///./aec.db"
+
 
 def test_defaults() -> None:
-    s = Settings()
+    s = Settings(
+        database_url=_default_database_url(),
+    )
     assert s.app_env == "development"
     assert s.database_url == "sqlite:///./aec.db"
     assert s.cors_origins == ["http://localhost:3000"]

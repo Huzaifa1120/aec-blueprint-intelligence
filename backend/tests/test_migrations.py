@@ -15,6 +15,7 @@ EXPECTED = {
     "drawing_revisions",
     "drawings",
     "estimates",
+    "labor_rates",
     "layers",
     "materials",
     "measurements",
