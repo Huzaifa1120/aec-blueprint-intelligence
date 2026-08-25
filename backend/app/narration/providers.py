@@ -18,6 +18,8 @@ import re
 import typing
 from typing import Protocol
 
+from app.common.normalize import nonzero_counters
+
 try:  # optional runtime enhancement — mirrors the heavy-deps policy
     import anthropic
 except ImportError:  # pragma: no cover - exercised implicitly when absent
@@ -161,11 +163,7 @@ class TemplateNarrator:
                 lines.append(f"- {label}: UNPRICED - review required.")
 
         scale = boq_payload.get("scale") or {}
-        counters = [
-            (name, value)
-            for name, value in (boq_payload.get("data_quality") or {}).items()
-            if isinstance(value, int) and not isinstance(value, bool) and value != 0
-        ]
+        counters = nonzero_counters(boq_payload.get("data_quality"))
         if scale.get("status") == "assumed" or counters:
             lines.extend(["", "Assumptions & Data Quality"])
             if scale.get("status") == "assumed":

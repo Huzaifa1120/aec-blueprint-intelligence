@@ -71,6 +71,7 @@ from app.parsing.text_walker import associate_text, probe_span_ocgs
 from app.assembly.formulas import FormulaValidationError
 from app.assembly.rules import apply_assembly, load_assembly_rule
 from app.catalog.prices import compute_boq_item, compute_labor_cost
+from app.common.normalize import source_region
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -84,23 +85,6 @@ router = APIRouter(prefix="/api/e2e", tags=["e2e"])
 # ---------------------------------------------------------------------------
 # Helper: compute BOQ line from a material + quantity
 # ---------------------------------------------------------------------------
-def _source_block(page: Any, bbox: Any) -> Optional[Dict[str, Any]]:
-    """Normalized click-through region for one BOQ row (spec v3 §7.12).
-
-    ``{"page": int, "bbox": [x0, y0, x1, y1]}`` in PDF points, or None when
-    no usable region exists — persistence stores exactly this shape.
-    """
-    if not bbox:
-        return None
-    try:
-        corners = [float(v) for v in bbox]
-    except (TypeError, ValueError):
-        return None
-    if len(corners) < 4:
-        return None
-    return {"page": int(page or 0), "bbox": corners}
-
-
 def _boq_line(
     assembly_type: str,
     material_name: str,
@@ -260,7 +244,7 @@ def _build_sheet_extraction(
                 size_json=route_sizes[index],
                 page=int(route.get("page") or 0),
                 bbox=(
-                    _source_block(route.get("page"), route.get("bbox")) or {}
+                    source_region(route.get("page"), route.get("bbox")) or {}
                 ).get("bbox"),
             )
             for index, route in enumerate(routes)
@@ -278,7 +262,7 @@ def _build_sheet_extraction(
                 source_path_ids=list(comp.get("source_path_ids", [])),
                 page=int(comp.get("page") or 0),
                 bbox=(
-                    _source_block(comp.get("page"), comp.get("bbox")) or {}
+                    source_region(comp.get("page"), comp.get("bbox")) or {}
                 ).get("bbox"),
             )
             for comp in components
@@ -633,7 +617,7 @@ def e2e_run(
                             size_source=size_source,
                             rule_version=applied.get("rule_version"),
                             scale_assumed=(scale_status == "assumed"),
-                            source=_source_block(
+                            source=source_region(
                                 route.get("page"), route.get("bbox")
                             ),
                         )
@@ -659,7 +643,7 @@ def e2e_run(
                             size_source=size_source,
                             rule_version=applied.get("rule_version"),
                             scale_assumed=(scale_status == "assumed"),
-                            source=_source_block(
+                            source=source_region(
                                 route.get("page"), route.get("bbox")
                             ),
                             labor_payload=labor_payload,
@@ -711,7 +695,7 @@ def e2e_run(
                             derivation=mat.get("derivation"),
                             size_source=None,
                             rule_version=rule.get("rule_version"),
-                            source=_source_block(
+                            source=source_region(
                                 comp.get("page"), comp.get("bbox")
                             ),
                         )
@@ -734,7 +718,7 @@ def e2e_run(
                             source_quality=source_quality,
                             size_source=None,
                             rule_version=rule.get("rule_version"),
-                            source=_source_block(
+                            source=source_region(
                                 comp.get("page"), comp.get("bbox")
                             ),
                             labor_payload=labor_payload,
