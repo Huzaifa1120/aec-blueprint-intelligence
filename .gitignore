@@ -11,6 +11,7 @@ node_modules/
 .env.local
 *.db
 data/samples/*.pdf
+backend/data/uploads/
 backend/tests/fixtures/out/
 pytest_output.txt
 run_script.py

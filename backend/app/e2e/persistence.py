@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session as OrmSession
@@ -41,6 +42,11 @@ from app.parsing.confidence_tiering import confidence_score
 from app.parsing.layer_map import layer_to_assembly
 
 logger = logging.getLogger(__name__)
+
+# Storage for the original uploaded drawing, one file per estimate
+# (backend/data/uploads/<estimate_id>.pdf). Created on demand; the recorded
+# path is what GET /api/estimates/{id}/file serves.
+_UPLOADS_DIR = Path(__file__).resolve().parents[2] / "data" / "uploads"
 
 
 def live_confidence_tier(
@@ -416,13 +422,17 @@ def persist_extraction(
     db: OrmSession,
     project_id: uuid.UUID | None,
     extraction: SheetExtraction,
+    pdf_bytes: bytes | None = None,
 ) -> uuid.UUID:
     """Persist one sheet extraction; returns the new estimate id.
 
     Replace strategy: an existing Sheet with the same name under the project
     has its measurements/boq_items/cascade children deleted before the fresh
     rows are inserted. Creates ``Project(name="Default Project")`` when
-    ``project_id`` is None.
+    ``project_id`` is None. When ``pdf_bytes`` is given, the exact uploaded
+    drawing is stored at ``data/uploads/<estimate_id>.pdf`` and its path
+    recorded on ``Estimate.source_pdf_path`` (served by
+    ``GET /api/estimates/{id}/file``).
     """
     project = _resolve_project(db, project_id)
 
@@ -525,6 +535,12 @@ def persist_extraction(
     )
     db.add(estimate)
     db.flush()
+
+    if pdf_bytes:
+        _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+        pdf_path = _UPLOADS_DIR / f"{estimate.id}.pdf"
+        pdf_path.write_bytes(pdf_bytes)
+        estimate.source_pdf_path = str(pdf_path)
 
     for row, route_row in zip(extraction.routes, route_rows):
         _persist_route_boq(

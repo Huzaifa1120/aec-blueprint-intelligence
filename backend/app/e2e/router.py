@@ -35,6 +35,7 @@ import logging
 import os
 import tempfile
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import pymupdf  # MUST import pymupdf, never fitz
@@ -679,8 +680,14 @@ def e2e_run(
         # bundle through the persistence spine in its own committing session.
         estimate_id: uuid.UUID | None = None
         if persist:
+            # Capture the exact uploaded bytes BEFORE the finally-unlink
+            # removes the temp copy — the stored artifact must be the file
+            # that was uploaded, byte for byte.
+            pdf_bytes = Path(tmp_path).read_bytes()
             with OrmSession(get_engine()) as persist_db:
-                estimate_id = persist_extraction(persist_db, project_id, extraction)
+                estimate_id = persist_extraction(
+                    persist_db, project_id, extraction, pdf_bytes=pdf_bytes
+                )
 
         response: Dict[str, Any] = {
             "status": "ok",
