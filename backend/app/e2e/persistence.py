@@ -660,6 +660,7 @@ def persist_extraction(
     estimate = Estimate(
         project_id=project.id,
         scale_status=extraction.scale_status,
+        source_quality=extraction.source_quality,
         data_quality_json=json.dumps(
             {"scale_str": extraction.scale_str, **(extraction.data_quality or {})}
         ),

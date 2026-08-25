@@ -72,6 +72,9 @@ class Estimate(Base):
     # JSON text: DataQuality counters for the run that produced this estimate
     scale_status: Mapped[str | None] = mapped_column(String(20))
     # parsed | assumed
+    source_quality: Mapped[str] = mapped_column(String(20), default="layered_vector")
+    # §7.12 input-quality verdict of the run (layered_vector | degraded_vector);
+    # legacy rows backfill 'layered_vector' via the migration's server default.
     source_pdf_path: Mapped[str | None] = mapped_column(String(500))
 
     project: Mapped["Project"] = relationship(back_populates="estimates")
