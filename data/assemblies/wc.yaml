@@ -1,5 +1,8 @@
 name: wc
 rule_version: "1.0.0"
+legend_keywords:
+  - WATER CLOSET
+  - WC
 bom:
   water_closet: 1
   angle_valve: 1

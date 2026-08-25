@@ -1,5 +1,8 @@
 name: cleanout
 rule_version: "1.0.0"
+legend_keywords:
+  - CLEANOUT
+  - CLEAN OUT
 bom:
   cleanout: 1
 labor:

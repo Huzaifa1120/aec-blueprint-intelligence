@@ -1,5 +1,9 @@
 name: sounder
 rule_version: "1.0.0"
+legend_keywords:
+  - SOUNDER
+  - BELL
+  - HORN
 bom:
   sounder: 1
   back_box: 1

@@ -1,5 +1,7 @@
 name: water_heater
 rule_version: "1.0.0"
+legend_keywords:
+  - WATER HEATER
 bom:
   water_heater: 1
   expansion_vessel: 1

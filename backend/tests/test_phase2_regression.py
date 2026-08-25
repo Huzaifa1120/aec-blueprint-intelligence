@@ -527,13 +527,14 @@ def test_ep3_e2e_pipeline_validation_on_sample(tmp_path, monkeypatch):
     # E1: vector classification -> pipeline ran with status "ok"
     assert body["status"] == "ok", f"Pipeline failed: {body}"
 
-    # E2: scale block contract (spec v3 §7.4 honesty). Probe 2026-08-25: the
-    # MMC title block carries a bare "SCALE" label and no ratio token anywhere
-    # in its extracted text, so this run must stamp value "1:100" with status
-    # "assumed" — the old silent default string could not tell the two apart.
-    # Denominator stays 100.0 either way; quantities are unchanged.
-    assert body["scale"] == {"value": "1:100", "status": "assumed"}, (
-        f"Expected assumed 1:100 scale block, got {body['scale']}"
+    # E2: scale block contract (spec v3 §7.4 honesty). The MMC title block
+    # carries 'SCALE' and the slash-form ratio token '1/100' as two separate
+    # rotated spans; resolve_scale's paired-label detection (2026-08-25
+    # elecfix) reads them as DETECTED 1:100 — previously this fell back to
+    # assumed 1:100 because only inline patterns existed. Value/denominator
+    # are unchanged, so quantities are unaffected either way.
+    assert body["scale"] == {"value": "1:100", "status": "detected"}, (
+        f"Expected detected 1:100 scale block, got {body['scale']}"
     )
 
     # E3: routes measured for mapped route layers (CONDUIT / CABLE_TRAY)

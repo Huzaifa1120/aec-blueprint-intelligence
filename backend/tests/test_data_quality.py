@@ -54,6 +54,8 @@ def test_response_carries_data_quality_block(monkeypatch):
         "degenerate_skipped": 0,
         "fu_corridor_excluded": 0,
         "classifier_errors": 0,
+        "title_block_excluded": 0,
+        "legend_gate_excluded": 0,
     }
 
 

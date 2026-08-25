@@ -6,4 +6,7 @@ labor:
   installation_hours: 0.3
 name: power_outlet
 rule_version: 1.0.0
+legend_keywords:
+  - POWER OUTLET
+  - POWER SOCKET
 waste_factor: 0.1

@@ -1,5 +1,9 @@
 name: hose_cabinet
 rule_version: "1.0.0"
+legend_keywords:
+  - HOSE CABINET
+  - HOSE REEL
+  - FIRE HOSE
 bom:
   hose_cabinet: 1
   landing_valve: 1

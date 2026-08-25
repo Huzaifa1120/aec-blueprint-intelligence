@@ -1,5 +1,8 @@
 name: socket_outlet
 rule_version: "1.0.0"
+legend_keywords:
+  - SOCKET
+  - SOCKET OUTLET
 bom:
   socket_outlet: 1.0
   box: 1.0

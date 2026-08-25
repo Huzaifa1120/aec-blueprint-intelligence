@@ -1,5 +1,11 @@
 name: hvac_equipment
 rule_version: "1.0.0"
+legend_keywords:
+  - FAN COIL
+  - AHU
+  - VAV
+  - UNIT HEATER
+  - EXHAUST FAN
 bom:
   unit_connector: 1.0
   vibration_isolator: 4.0

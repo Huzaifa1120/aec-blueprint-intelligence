@@ -6,4 +6,6 @@ labor:
   installation_hours: 0.5
 name: switch
 rule_version: 1.0.0
+legend_keywords:
+  - SWITCH
 waste_factor: 0.1

@@ -1,5 +1,10 @@
 name: lighting_outlet
 rule_version: "1.0.0"
+legend_keywords:
+  - LIGHTING
+  - LIGHT FIXTURE
+  - LAMP
+  - LUMINAIRE
 bom:
   lighting_unit: 1.0
   lampholder: 1.0

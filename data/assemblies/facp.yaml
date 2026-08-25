@@ -1,5 +1,9 @@
 name: facp
 rule_version: "1.0.0"
+legend_keywords:
+  - FIRE ALARM CONTROL
+  - FACP
+  - FIRE ALARM PANEL
 bom:
   fire_alarm_panel: 1
   batteries: 1
