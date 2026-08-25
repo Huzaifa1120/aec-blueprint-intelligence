@@ -19,7 +19,7 @@ export function ProtocolCard({ title, rows, footer, className }: ProtocolCardPro
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-2xl border border-ink-black bg-ink-black font-mono text-[13px] leading-[26px]",
+        "overflow-hidden rounded-2xl border border-ink-black bg-ink-black font-mono text-[13px] leading-[26px] dark:border-outline-variant",
         className,
       )}
     >

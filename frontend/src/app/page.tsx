@@ -139,7 +139,7 @@ export default function UploadPage() {
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-8">
         <section
           aria-labelledby="upload-heading"
-          className="rise-in overflow-hidden rounded-2xl bg-ink-black p-8 pt-0 sm:p-10 sm:pt-0"
+          className="rise-in overflow-hidden rounded-2xl bg-ink-black p-8 pt-0 ring-1 ring-ink-black sm:p-10 sm:pt-0 dark:bg-card dark:ring-outline-variant"
         >
           <HazardStripe className="-mx-8 mb-6 sm:-mx-10" />
           <p className="label-mono text-safety-amber">Huzaifa AEC · Takeoff</p>
