@@ -245,7 +245,7 @@ export default function UploadPage() {
               className="rounded-lg border border-border bg-card p-5 transition-colors hover:border-safety-amber"
             >
               <p className="label-mono text-steel">Step {step.n}</p>
-              <h2 className="mt-1 font-heading text-[17px] leading-[22px] text-ink-black">
+              <h2 className="mt-1 font-heading text-[17px] leading-[22px] text-ink-900">
                 {step.title}
               </h2>
               <GoggleLineDivider className="mt-2 w-16" />

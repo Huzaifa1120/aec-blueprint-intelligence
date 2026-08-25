@@ -111,6 +111,7 @@
   --ink-muted: #a8b0ab33;
 
   /* Ink text scale inverts for dark canvas */
+  --ink-900: var(--paper);
   --ink-700: #e8e7e0;
   --ink-500: #a8b0ab;
   --ink-300: #77786f;
@@ -124,6 +125,8 @@
   --signal-error: var(--tier-assumed);
   --signal-info: #a8b0ab;
   --raster-flag: #a8b0ab;
+  --guard-green: var(--tier-measured);
+  --destructive: var(--tier-assumed);
 
   /* Accent washes stay amber-translucent */
   --accent: var(--green-tint);
