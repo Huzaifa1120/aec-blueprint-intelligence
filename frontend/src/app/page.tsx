@@ -222,7 +222,7 @@ export default function UploadPage() {
             )}
           </div>
 
-          <aside>
+          <aside aria-label="Pipeline contract">
             <ProtocolCard
               title="Pipeline contract"
               className="rise-in"

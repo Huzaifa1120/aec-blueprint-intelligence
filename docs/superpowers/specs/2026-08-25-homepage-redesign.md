@@ -26,7 +26,7 @@ Single centered column of three stacked bands inside `max-w-5xl`, vertical gap 8
      degraded-vector re-export/continue-anyway flow → run button.
    - **Right:** ink-black `ProtocolCard` titled "Pipeline contract" with static rows:
      Verdict rule (`measured > derived > assumed`), Input (`PDF ≤ 50 MB`),
-     Scale (`auto-resolved · flagged if assumed`), Output (`BOQ → human review`).
+     Scale (`auto · flagged if assumed`), Output (`BOQ → review`).
      Content sourced from project docs; no prices or rates hardcoded.
 3. **Steps strip** — three numbered service cards on one row (`sm+`; stacks below):
    `01 Quality gate`, `02 Deterministic takeoff`, `03 Human review`. Paper background, 1px steel
