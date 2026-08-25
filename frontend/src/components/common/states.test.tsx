@@ -58,7 +58,7 @@ describe("state components", () => {
         <main>workspace</main>
       </AppShell>,
     )
-    expect(screen.getByRole("link", { name: "AEC Blueprint" })).toHaveAttribute("href", "/")
+    expect(screen.getByRole("link", { name: "Huzaifa AEC home" })).toHaveAttribute("href", "/")
     expect(screen.getByRole("link", { name: "Estimates" })).toHaveAttribute("href", "/estimates")
     expect(screen.getByRole("link", { name: "Catalog" })).toHaveAttribute("href", "/catalog")
     expect(screen.getByText("Export ▾")).toBeInTheDocument()

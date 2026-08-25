@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react"
 
 import { apiPost } from "@/lib/api"
 import { Button } from "@/components/ui/button"
+import { HazardStripe } from "@/components/ui/HazardStripe"
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
 
 export const REEXPORT_MESSAGE =
@@ -49,7 +50,7 @@ export function ReexportRequest({ drawingId }: ReexportRequestProps) {
       <div
         role="status"
         data-testid="reexport-sent"
-        className="rounded-lg border border-border bg-canvas p-4"
+        className="rounded-2xl border border-border bg-canvas p-4"
       >
         <p className="text-sm font-semibold text-success">Request sent.</p>
         <p className="mt-1 text-sm text-ink-500">
@@ -60,44 +61,51 @@ export function ReexportRequest({ drawingId }: ReexportRequestProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3" noValidate>
-      <div className="flex flex-col gap-1">
-        <label htmlFor="reexport-recipient" className="text-xs font-medium text-ink-700">
-          Recipient email
-        </label>
-        <input
-          id="reexport-recipient"
-          type="email"
-          required
-          value={recipient}
-          onChange={(event) => setRecipient(event.target.value)}
-          placeholder="author@company.com"
-          aria-invalid={error === INVALID_EMAIL_COPY || undefined}
-          className="h-9 rounded-lg border border-input bg-surface px-3 text-sm text-ink-900 outline-none placeholder:text-ink-300 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-        />
-      </div>
-      <div className="flex flex-col gap-1">
-        <label htmlFor="reexport-message" className="text-xs font-medium text-ink-700">
-          Message to the author
-        </label>
-        <textarea
-          id="reexport-message"
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-          rows={4}
-          className="resize-y rounded-lg border border-input bg-surface px-3 py-2 text-sm leading-relaxed text-ink-900 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-        />
-      </div>
-      {error && (
-        <p role="alert" className="text-sm text-error">
-          {error}
-        </p>
-      )}
-      <div>
-        <Button type="submit" disabled={phase === "sending"}>
-          {phase === "sending" ? <LoadingSpinner className="text-primary-foreground" /> : null}
-          Request re-export
-        </Button>
+    <form
+      onSubmit={handleSubmit}
+      className="overflow-hidden rounded-2xl border border-steel bg-paper"
+      noValidate
+    >
+      <HazardStripe className="opacity-15" />
+      <div className="flex flex-col gap-3 p-4">
+        <div className="flex flex-col gap-1">
+          <label htmlFor="reexport-recipient" className="text-xs font-medium text-ink-700">
+            Recipient email
+          </label>
+          <input
+            id="reexport-recipient"
+            type="email"
+            required
+            value={recipient}
+            onChange={(event) => setRecipient(event.target.value)}
+            placeholder="author@company.com"
+            aria-invalid={error === INVALID_EMAIL_COPY || undefined}
+            className="h-9 rounded-lg border border-input bg-surface px-3 text-sm text-ink-900 outline-none placeholder:text-ink-300 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="reexport-message" className="text-xs font-medium text-ink-700">
+            Message to the author
+          </label>
+          <textarea
+            id="reexport-message"
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            rows={4}
+            className="resize-y rounded-lg border border-input bg-surface px-3 py-2 text-sm leading-relaxed text-ink-900 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+        </div>
+        {error && (
+          <p role="alert" className="text-sm text-error">
+            {error}
+          </p>
+        )}
+        <div>
+          <Button type="submit" disabled={phase === "sending"}>
+            {phase === "sending" ? <LoadingSpinner className="text-primary-foreground" /> : null}
+            Request re-export
+          </Button>
+        </div>
       </div>
     </form>
   )

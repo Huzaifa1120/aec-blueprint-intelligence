@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button"
 import { DropZone } from "@/components/upload/DropZone"
 import { QualityGateBadge } from "@/components/upload/QualityGateBadge"
 import { ReexportRequest } from "@/components/upload/ReexportRequest"
+import { GoggleLineDivider } from "@/components/ui/GoggleLineDivider"
+import { HazardStripe } from "@/components/ui/HazardStripe"
 import { usePipelineRun } from "@/hooks/usePipelineRun"
 import { apiGet, apiPostForm } from "@/lib/api"
 import type { DrawingQualityCheck, QualityVerdict } from "@/types/drawing"
@@ -115,8 +117,21 @@ export default function UploadPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto flex w-full max-w-xl flex-col gap-8 px-4 py-16">
-        <h1 className="text-xl font-semibold text-ink-900">Upload a drawing to begin</h1>
+      <div className="mx-auto flex w-full max-w-xl flex-col gap-8 px-4 py-12">
+        <section
+          aria-labelledby="upload-heading"
+          className="overflow-hidden rounded-2xl bg-ink-black p-8 pt-0"
+        >
+          <HazardStripe className="-mx-8 mb-6" />
+          <p className="label-mono text-safety-amber">Huzaifa AEC · Takeoff</p>
+          <h1
+            id="upload-heading"
+            className="mt-3 font-heading text-[32px] leading-[36px] tracking-[-0.01em] text-paper"
+          >
+            Upload a drawing to begin
+          </h1>
+          <GoggleLineDivider className="mt-4 w-44" />
+        </section>
 
         <DropZone onFile={checkFile} disabled={phase === "checking"} />
 
@@ -130,11 +145,9 @@ export default function UploadPage() {
         {(phase === "ready" || phase === "running") && (
           <section aria-label="Quality check" className="flex flex-col gap-6">
             <div className="flex items-center gap-3" aria-hidden="true">
-              <span className="h-px flex-1 bg-border" />
-              <span className="text-xs font-semibold tracking-widest text-ink-300 uppercase">
-                Quality check
-              </span>
-              <span className="h-px flex-1 bg-border" />
+              <GoggleLineDivider className="flex-1 opacity-50" />
+              <span className="label-mono text-steel">Quality check</span>
+              <GoggleLineDivider className="flex-1 scale-x-[-1] opacity-50" />
             </div>
 
             {checkFailed ? (

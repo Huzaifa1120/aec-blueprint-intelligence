@@ -13,6 +13,14 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+@utility label-mono {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -22,5 +30,8 @@
   }
   html {
     @apply font-sans;
+  }
+  ::selection {
+    background-color: #f5a62340;
   }
 }

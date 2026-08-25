@@ -1,92 +1,197 @@
-# Design — Visual System
+# Design System — huzazifa aecc
 
-Applies to the web interface (Next.js + TypeScript), primarily the **Human Review UI** — the screen estimators stare at. Aesthetic goal: precision, calm, engineering-grade. Nothing cute; everything legible on a large monitor next to a real drawing.
+**Source:** Stitch Project "Avant-Garde Design System" + `docs/
 
 ---
 
-## 1. Design principles
+## 1. Brand Identity
 
-- **The drawing is the star.** UI chrome must never compete with the rendered blueprint (light/dark panels, muted tones).
-- **Numbers must be readable at a glance.** Tabular data uses high-contrast mono or tabular numerals.
-- **Confidence is communicated, not hidden.** Status is a colored tag, not a footnote.
-- **Click → see geometry.** The review overlay is the core screen; design it first.
+// add this
+**Visual Persona:** "The Safety Authority" — High-contrast, technical, documented.
 
-## 2. Theme: Dark engineering
+---
 
-Default to a dark, low-saturation "drafting room" theme; light theme optional later.
+## 2. Color Palette
 
-| Token | Value | Usage |
-|---|---|---|
-| `bg-base` | `#10141A` | App background (dark slate) |
-| `bg-panel` | `#161C24` | Panels, cards, sidebar |
-| `bg-elevated` | `#1D2530` | Modals, popovers, hover |
-| `border-subtle` | `#262F3B` | Borders, dividers |
-| `text-primary` | `#E6EAF0` | Body text |
-| `text-secondary` | `#9AA7B8` | Labels, meta |
-| `text-muted` | `#5B6B7E` | Disabled, placeholders |
+| Token            | Hex       | Usage                                                               |
+| ---------------- | --------- | ------------------------------------------------------------------- |
+| **Ink Black**    | `#12130F` | Primary authority, deep backgrounds, heavy headers, primary text    |
+| **Safety Amber** | `#F5A623` | CTAs, active nav states, hazard accents, goggle motifs              |
+| **Guard Green**  | `#1F7A53` | "Compliant," "Certified," "Eco-Safe" indicators (never for buttons) |
+| **Paper**        | `#FAF9F5` | Warm off-white canvas, mimics technical manual paper                |
+| **Steel**        | `#5B6660` | Borders, captions, muted data labels                                |
+| **Hazard Red**   | `#C43B2E` | Emergency only — high-risk alerts, incident reporting               |
 
-## 3. Accent & semantic colors
+### Extended Palette (from Stitch)
 
-| Token | Value | Usage |
-|---|---|---|
-| `accent` | `#3E9BFF` | Primary actions, selection, links |
-| `ok` | `#34C77B` | `MEASURED` status |
-| `derived` | `#E5A02E` | `DERIVED` status (amber) |
-| `assumed` | `#E8554D` | `ASSUMED` status (red — forces review) |
-| `unmapped` | `#D2B48C` | `UNMAPPED` status (tan — measured but no rule yet) |
-| `highlight` | `#7C5CFF` | Selected BOQ line / source-geometry overlay |
+| Token                  | Hex         | Usage                          |
+| ---------------------- | ----------- | ------------------------------ |
+| Surface Dim            | `#DBDAD6`   | Subtle backgrounds             |
+| Surface Container      | `#EFEEEA`   | Card backgrounds               |
+| Surface Container High | `#E9E8E4`   | Elevated surfaces              |
+| Outline                | `#777870`   | Borders                        |
+| Outline Variant        | `#C7C7BF`   | Light borders                  |
+| Green Tint             | `#E7F2EC`   | Badge/chip backgrounds         |
+| Ink Muted              | `#5B666033` | Transparent steel for overlays |
 
-Confidence colors are a **hard product rule**: green/amber/red/tan map 1:1 to `MEASURED`/`DERIVED`/`ASSUMED`/`UNMAPPED`. Never render confidence as a generic gray or as a single blended % gauge.
+### Color Application Rules
 
-**Source-quality tagging (spec v3):** every BOQ line also shows its input provenance — `layered_vector`, `degraded_vector`, or `raster`. Render it as a subtle suffix badge on the confidence tag (e.g. `MEASURED · flattened`), never as a second color-coded system and never as a blended score. Rows from `degraded_vector`/`raster` sources get a dashed left border in the row's confidence color and are excluded from bulk-accept preselection regardless of tier. No new accent color is introduced for provenance — reuse `text-secondary`; provenance is context, not alarm.
+- **Primary buttons:** Safety Amber on Ink Black (maximum visibility)
+- **Guard Green:** Only for reassurance indicators (certifications, safety status)
+- **Hazard Red:** Only for emergency/urgent actions
+- **Paper:** Default page background
+- **Ink Black:** Hero sections, protocol cards, footer
 
-## 4. Typography
+---
 
-| Role | Font | Notes |
-|---|---|---|
-| UI / body | Inter | Primary interface font |
-| Numeric tables | Inter with `font-feature-settings: "tnum"` (or JetBrains Mono) | Tabular figures so BOQ columns align |
-| Monospace / code | JetBrains Mono | Layer names, rule IDs, file paths |
-| Blueprint annotations | system mono / blueprint font | only on the drawing overlay, matching sheet style |
+## 3. Typography
 
-Scale: 13px base, 15px table data, 18px section titles, 24px page titles. Never go below 12px. Dense but not cramped — spacing ≥ 4px grid.
+### Font Stack
 
-## 5. Layout
+| Role               | Font          | Weight   | Usage                                       |
+| ------------------ | ------------- | -------- | ------------------------------------------- |
+| **Headlines**      | Archivo Black | 900      | High-impact signage, section headers        |
+| **Body**           | Inter         | 400, 500 | Paragraphs, navigation, UI text             |
+| **Data/Technical** | IBM Plex Mono | 400, 500 | SKU numbers, specs, EPA data, protocol info |
 
-- **Three-pane review screen** (the flagship view):
-  - Left: drawing canvas (rendered PDF via `pdf.js`) with overlay highlights per discipline.
-  - Center/right: BOQ table — each row = quantity, unit, unit price, total, confidence tag.
-  - Click row → center highlight jumps to source geometry; click geometry → row selected.
-  - Top bar: project, sheet name, scale badge, processing status pill, export actions, discipline filter dropdown.
-- Status pills: `QUEUED` · `PARSING` · `DONE` · `ERROR` · `DEGRADED_INPUT` (Input Quality Gate flagged the file; tooltip explains, and in closed deployment offers the re-export request action) — with reason tooltip on error.
-- Accept / correct / reject actions inline per row; bulk-accept bar appears when a selection is all `MEASURED` **and** all `layered_vector`.
-- Discipline filter: filter BOQ items by classified layer discipline (architectural, electrical, envelope, structural, unclassified).
-- Layer filter: filter BOQ items by specific layer name within the selected discipline.
-- Source-quality filter (spec v3): `layered_vector` / `degraded_vector` / `raster` — composable with discipline and layer filters.
-- Review-time instrumentation runs invisibly: time-on-sheet logged server-side per confidence tier (feeds `GET /projects/{id}/review-metrics`). Never show a visible timer to the estimator.
-- When multiple disciplines are present, group the BOQ by discipline with collapsible sections.
+### Type Scale
 
-## 6. Drawing overlay colors
+| Token                | Font          | Size | Line Height | Letter Spacing |
+| -------------------- | ------------- | ---- | ----------- | -------------- |
+| `headline-xl`        | Archivo Black | 52px | 54px        | -0.01em        |
+| `headline-xl-mobile` | Archivo Black | 38px | 40px        | -0.01em        |
+| `headline-lg`        | Archivo Black | 32px | 36px        | -0.01em        |
+| `headline-sm`        | Archivo Black | 17px | 22px        | —              |
+| `body-lg`            | Inter         | 18px | 28px        | —              |
+| `body-md`            | Inter         | 14px | 22px        | —              |
+| `label-mono`         | IBM Plex Mono | 12px | 16px        | 0.08em         |
+| `data-mono`          | IBM Plex Mono | 13px | 26px        | —              |
 
-Overlay strokes must read against any CAD linework:
+### Formatting Rules
 
-| Element | Color | Stroke |
-|---|---|---|
-| Component box | `accent` | 1.5px, filled 8% opacity |
-| Route polyline | `#2FC6C0` | 2px |
-| Highlight (active) | `highlight` | 2.5px glow |
-| Review-needed | `assumed` dashed | 1.5px dashed |
-| Unmapped overlay | `unmapped` dashed | 1.5px dashed — geometry measured but no assembly rule yet |
+- **All-caps** with IBM Plex Mono for eyebrows and section tags
+- **Sentence-case** for headlines (not ALL CAPS)
+- **No decorative fonts** — only the three specified
 
-## 7. Empty & error states
+---
 
-- Empty project: "Upload a drawing to begin" + drop zone, never a blank page.
-- Processing: sheet thumbnail with progress + current stage label.
-- Degraded input (spec v3): banner on the sheet view — "This file has no layer data. Re-export with layers included, or upload the native DWG/DXF." with a **Request re-export** action; downstream rows stay visible but carry `degraded_vector` provenance badges and are excluded from bulk-accept.
-- Error: reason + retry button; no dead ends.
+## 4. Spacing & Layout
 
-## 8. Implementation notes
+### Spacing Tokens
 
-- Tailwind CSS (v4, matches existing stack) with CSS variables for the tokens above.
-- Overlay: SVG positioned over the `pdf.js` canvas (shared coordinate transform).
-- Dark theme default; tokens centralized so a light theme can drop in later.
+| Token             | Value  |
+| ----------------- | ------ |
+| Container Max     | 1140px |
+| Section V-Padding | 64px   |
+| Grid Gap          | 44px   |
+| Component Gap     | 22px   |
+| Margin SM         | 14px   |
+| Safe Area         | 28px   |
+
+### Grid System
+
+- **Columns:** 12-column grid
+- **Breakpoints:** Mobile-first (320px → 768px → 1024px → 1280px)
+- **Container:** Centered, max-width 1140px, padding 28px mobile / 0 desktop
+- **Section separation:** 64px vertical padding
+
+### Responsive Behavior
+
+| Breakpoint     | Behavior                                                   |
+| -------------- | ---------------------------------------------------------- |
+| < 768px        | Single column, headline-xl-mobile (38px), full-width cards |
+| 768px - 1024px | 2-column grid, scaled headlines                            |
+| > 1024px       | Full 12-column grid, headline-xl (52px)                    |
+
+---
+
+## 5. Elevation & Depth
+
+| Technique                 | Usage                                                |
+| ------------------------- | ---------------------------------------------------- |
+| **Color blocking**        | Ink Black sections against Paper background          |
+| **Low-contrast outlines** | Steel borders on cards and headers                   |
+| **Heavy drop-shadow**     | `0 12px 24px rgba(0,0,0,.4)` for large visuals       |
+| **Hazard overlays**       | Diagonal amber/transparent stripes at 10-15% opacity |
+| **Tonal layering**        | Surface variants for nested cards                    |
+
+---
+
+## 6. Shape Language
+
+| Element      | Radius      | Notes                      |
+| ------------ | ----------- | -------------------------- |
+| Buttons      | 0-4px       | Technical, slightly sharp  |
+| Cards        | 6-8px       | Differentiate from buttons |
+| Status chips | 20px (pill) | Certification badges only  |
+| Input fields | 4px max     | Strict, rectangular        |
+
+---
+
+## 7. Signature Components
+
+### Goggle Line Divider
+
+- **Stroke:** 2px solid Safety Amber
+- **Shape:** Custom SVG wave mimicking PPE goggle silhouette
+- **Usage:** Section separators (replace all `<hr>` tags)
+
+### Protocol Card
+
+- **Background:** Ink Black
+- **Text:** IBM Plex Mono, white or Guard Green
+- **Rows:** Separated by 1px white border at 10% opacity
+- **Usage:** Technical specs, dosage tables, safety data
+
+### Service Card
+
+- **Background:** Paper
+- **Border:** 1px Steel
+- **Title accent:** Miniature amber goggle-line under title
+- **Hover:** Subtle elevation change
+
+### Chip/Badge
+
+- **Style:** Pill-shaped (20px radius)
+- **Colors:** Guard Green text on Green Tint background
+- **Usage:** "Pet-Safe," "EPA-Approved," "Certified"
+
+---
+
+## 8. Button Variants
+
+| Variant     | Background   | Text      | Border          | Usage             |
+| ----------- | ------------ | --------- | --------------- | ----------------- |
+| **Primary** | Safety Amber | Ink Black | None            | Main CTAs         |
+| **Outline** | Transparent  | Ink Black | 1.5px Ink Black | Secondary actions |
+| **Danger**  | Hazard Red   | Paper     | None            | Emergency only    |
+
+---
+
+## 9. Form Inputs
+
+- **Border:** 1px Steel
+- **Focus:** 2px Safety Amber ring
+- **Border radius:** 4px max
+- **Labels:** Always visible (not floating)
+- **Error state:** Hazard Red border + message
+
+---
+
+## 10. Image Direction
+
+| Rule                   | Detail                                           |
+| ---------------------- | ------------------------------------------------ |
+| **Technician-centric** | Focus on process and PPE, not pests              |
+| **Industrial macro**   | High-contrast, desaturated equipment photography |
+| **No fear marketing**  | Avoid "scary bug" tropes                         |
+| **Local context**      | Lahore industrial sectors, Pakistani settings    |
+
+---
+
+## 11. Tone of Voice
+
+- **Direct & Technical:** "Initiate lockdown protocols" not "Click here"
+- **Evidence-Based:** Pair claims with data ("99.9% Compliance Rate")
+- **Regional:** Reference Lahore industrial sectors (Pharma, Agri-Storage, Logistics)
+- **Authoritative:** Not salesy — documented, precise, compliant

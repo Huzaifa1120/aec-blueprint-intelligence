@@ -13,7 +13,7 @@ export function UnpricedGap({ count }: { count: number }) {
       </p>
       <Link
         href="/catalog"
-        className="flex shrink-0 items-center gap-1 text-xs font-medium text-primary hover:underline"
+        className="flex shrink-0 items-center gap-1 text-xs font-medium text-ink-black decoration-safety-amber decoration-2 underline-offset-4 hover:underline"
       >
         Open catalog to add rates
         <ArrowRight aria-hidden="true" className="size-3" />

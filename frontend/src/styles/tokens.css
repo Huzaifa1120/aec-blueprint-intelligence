@@ -1,68 +1,86 @@
-/* Technical Daylight design tokens — single source of truth (spec §1).
+/* Huzaifa AEC design tokens — single source of truth (docs/DESIGN.md).
    Components must never hardcode hex values. */
 
 :root {
-  /* ── Ink scale ────────────────────────────── */
-  --ink-900: #0b1929;
-  --ink-700: #1a3050;
-  --ink-500: #3e618a;
-  --ink-300: #7a9fbf;
-  --ink-100: #c8d8ea;
-  --ink-50: #e8eef5;
+  /* ── Core palette (DESIGN.md §2) ─────────── */
+  --ink-black: #12130f;
+  --safety-amber: #f5a623;
+  --guard-green: #1f7a53;
+  --paper: #faf9f5;
+  --steel: #5b6660;
+  --hazard-red: #c43b2e;
 
-  /* ── Surfaces ─────────────────────────────── */
-  --canvas: #f2f5f9;
-  --surface: #ffffff;
+  /* ── Extended palette (DESIGN.md §2) ─────── */
+  --surface-dim: #dbdad6;
+  --surface-container: #efeeea;
+  --surface-container-high: #e9e8e4;
+  --outline: #777870;
+  --outline-variant: #c7c7bf;
+  --green-tint: #e7f2ec;
+  --ink-muted: #5b666033;
 
-  /* ── Accent ───────────────────────────────── */
-  --engineering-blue: #0072cf;
-  --accent-wash: #e0f0ff;
+  /* ── Ink scale ← doc neutrals ────────────── */
+  --ink-900: var(--ink-black);
+  --ink-700: var(--ink-black);
+  --ink-500: var(--steel);
+  --ink-300: var(--outline);
+  --ink-100: var(--outline-variant);
+  --ink-50: var(--surface-container);
 
-  /* ── Confidence tiers ─────────────────────── */
-  --tier-measured: #0da56a;
-  --tier-derived: #6b4ff8;
-  --tier-assumed: #d97706;
+  /* ── Surfaces ────────────────────────────── */
+  --canvas: var(--paper);
+  --surface: var(--paper);
 
-  /* ── Source quality / semantic ────────────── */
-  --raster-flag: #e85d3a;
-  --signal-error: #c41e3a;
+  /* ── Accent ← Safety Amber ───────────────── */
+  --engineering-blue: var(--safety-amber);
+  --accent-wash: #f5a6231f;
 
-  /* ── Spec §1.1 semantic aliases ───────────── */
+  /* ── Confidence tiers (hard product rule) ── */
+  --tier-measured: var(--guard-green);
+  --tier-derived: var(--safety-amber);
+  --tier-assumed: var(--hazard-red);
+
+  /* ── Source quality / semantic ───────────── */
+  --raster-flag: var(--steel);
+  --signal-error: var(--hazard-red);
+
+  /* ── Semantic aliases ────────────────────── */
   --signal-success: var(--tier-measured);
-  --signal-warning: var(--tier-assumed);
-  --signal-info: var(--engineering-blue);
+  --signal-warning: var(--tier-derived);
+  --signal-info: var(--steel);
 
-  /* ── Motion easings (spec §1.5) ───────────── */
+  /* ── Motion easings ──────────────────────── */
   --ease-out-snappy: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-symmetric: cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* ── shadcn semantics ← Technical Daylight ── */
-  --background: var(--canvas);
-  --foreground: var(--ink-700);
-  --card: var(--surface);
-  --card-foreground: var(--ink-900);
-  --popover: var(--surface);
-  --popover-foreground: var(--ink-900);
-  --primary: var(--engineering-blue);
-  --primary-foreground: #ffffff;
-  --secondary: var(--accent-wash);
-  --secondary-foreground: var(--ink-900);
-  --muted: var(--ink-50);
-  --muted-foreground: var(--ink-500);
-  --accent: var(--accent-wash);
-  --accent-foreground: var(--ink-900);
-  --destructive: var(--signal-error);
-  --border: var(--ink-100);
-  --input: var(--ink-100);
-  --ring: var(--engineering-blue);
+  /* ── shadcn semantics ← DESIGN.md world ──── */
+  --background: var(--paper);
+  --foreground: var(--ink-black);
+  --card: var(--paper);
+  --card-foreground: var(--ink-black);
+  --popover: var(--surface-container-high);
+  --popover-foreground: var(--ink-black);
+  --primary: var(--safety-amber);
+  --primary-foreground: var(--ink-black);
+  --secondary: var(--surface-container);
+  --secondary-foreground: var(--ink-black);
+  --muted: var(--surface-dim);
+  --muted-foreground: var(--steel);
+  --accent: var(--green-tint);
+  --accent-foreground: var(--guard-green);
+  --destructive: var(--hazard-red);
+  --destructive-foreground: var(--paper);
+  --border: var(--outline-variant);
+  --input: var(--steel);
+  --ring: var(--safety-amber);
 
-  /* ── Motion (spec §1.5) ───────────────────── */
+  /* ── Motion ──────────────────────────────── */
   --duration-fast: 120ms;
   --duration-base: 220ms;
   --duration-slow: 380ms;
 
-  /* ── Radius base (shadcn scale derives from this) ── */
-  --radius: 0.625rem;
+  /* ── Radius base — buttons 4px max, cards derive to 6–8px ── */
+  --radius: 0.25rem;
 }
 
 @theme inline {
@@ -86,7 +104,21 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* Extended palette */
+  /* Core + extended palette (doc vocabulary) */
+  --color-paper: var(--paper);
+  --color-ink-black: var(--ink-black);
+  --color-safety-amber: var(--safety-amber);
+  --color-guard-green: var(--guard-green);
+  --color-steel: var(--steel);
+  --color-hazard-red: var(--hazard-red);
+  --color-surface-dim: var(--surface-dim);
+  --color-surface-container: var(--surface-container);
+  --color-surface-high: var(--surface-container-high);
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+  --color-green-tint: var(--green-tint);
+
+  /* Legacy-facing aliases (kept stable across the swap) */
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-ink-900: var(--ink-900);
@@ -108,14 +140,16 @@
   --color-info: var(--signal-info);
 
   /* Typography roles (faces load via next/font variables on <html>) */
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, "Cascadia Code", monospace;
-  --font-heading: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "Cascadia Code", monospace;
+  --font-heading:
+    var(--font-archivo-black), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 
-  /* Shadows — three levels only (spec §1.4) */
-  --shadow-sm: 0 1px 3px 0 rgb(11 25 41 / 0.08);
-  --shadow-md: 0 4px 12px 0 rgb(11 25 41 / 0.12);
-  --shadow-lg: 0 16px 40px 0 rgb(11 25 41 / 0.18);
+  /* Shadows — flat-by-default; borders carry depth.
+     Only large visuals/modals take the heavy drop-shadow (DESIGN.md §5). */
+  --shadow-sm: 0 1px 2px 0 rgb(18 19 15 / 0.06);
+  --shadow-md: 0 4px 12px 0 rgb(18 19 15 / 0.14);
+  --shadow-lg: 0 12px 24px 0 rgb(0 0 0 / 0.4);
 }
 
 @media (prefers-reduced-motion: reduce) {

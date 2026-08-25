@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest"
 
 const HEX_SWATCH_RE = /hex:\s*"(#[0-9a-fA-F]{6})"/g
 
-const ANCHOR_HEXES = ["#0b1929", "#0072cf", "#0da56a", "#6b4ff8", "#d97706", "#e85d3a", "#c41e3a"]
+const ANCHOR_HEXES = ["#12130f", "#faf9f5", "#f5a623", "#1f7a53", "#5b6660", "#c43b2e", "#e7f2ec"]
 
 let tokensCss = ""
 let pageSource = ""
