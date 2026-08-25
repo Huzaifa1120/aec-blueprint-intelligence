@@ -1,0 +1,18 @@
+table: schedule_blocks
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  sheet_id:
+    type: uuid
+    foreign_key: sheets.id
+  block_type:
+    type: varchar(30)
+  page_region_json:
+    type: varchar(500)
+  entries_json:
+    type: text
+  source_quality:
+    type: varchar(20)
+    default: layered_vector

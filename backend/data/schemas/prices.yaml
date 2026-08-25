@@ -1,0 +1,20 @@
+table: prices
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  material_id:
+    type: uuid
+    foreign_key: materials.id
+  unit_price:
+    type: numeric(12,2)
+  currency:
+    type: varchar(3)
+    default: USD
+  effective_from:
+    type: date
+    nullable: true
+  effective_to:
+    type: date
+    nullable: true

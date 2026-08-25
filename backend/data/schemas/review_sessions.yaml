@@ -1,0 +1,18 @@
+table: review_sessions
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  project_id:
+    type: uuid
+    foreign_key: projects.id
+    nullable: true
+  sheet_label:
+    type: varchar(200)
+  started_at:
+    type: datetime
+    default: utcnow
+  ended_at:
+    type: datetime
+    nullable: true

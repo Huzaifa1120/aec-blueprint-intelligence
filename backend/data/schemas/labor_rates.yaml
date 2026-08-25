@@ -1,0 +1,29 @@
+table: labor_rates
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  name:
+    type: varchar(200)
+    unique: true
+  productivity_rate:
+    type: float
+    nullable: true
+    default: null
+  hourly_rate:
+    type: float
+    nullable: true
+    default: null
+  category:
+    type: varchar(100)
+    nullable: true
+    default: null
+  effective_from:
+    type: date
+    nullable: true
+    default: null
+  effective_to:
+    type: date
+    nullable: true
+    default: null

@@ -1,0 +1,13 @@
+table: materials
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  name:
+    type: varchar(200)
+  unit:
+    type: varchar(20)
+  category:
+    type: varchar(100)
+    nullable: true

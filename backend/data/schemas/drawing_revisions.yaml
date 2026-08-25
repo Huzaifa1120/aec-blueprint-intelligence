@@ -1,0 +1,17 @@
+table: drawing_revisions
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  drawing_id:
+    type: uuid
+    foreign_key: drawings.id
+  revision:
+    type: varchar(20)
+  issued_date:
+    type: date
+    nullable: true
+  source_path_type:
+    type: varchar(50)
+    nullable: true

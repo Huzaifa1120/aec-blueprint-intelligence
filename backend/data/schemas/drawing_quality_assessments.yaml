@@ -1,0 +1,20 @@
+table: drawing_quality_assessments
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  drawing_id:
+    type: uuid
+    foreign_key: drawings.id
+    nullable: true
+  file_name:
+    type: varchar(500)
+  verdict:
+    type: varchar(20)
+  metrics_json:
+    type: varchar(2000)
+    nullable: true
+  created_at:
+    type: datetime
+    default: func.now

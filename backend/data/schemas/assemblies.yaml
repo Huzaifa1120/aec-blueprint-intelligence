@@ -1,0 +1,14 @@
+table: assemblies
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  name:
+    type: varchar(200)
+    unique: true
+  rule_version:
+    type: varchar(50)
+  formula_or_bom:
+    type: json
+    nullable: true

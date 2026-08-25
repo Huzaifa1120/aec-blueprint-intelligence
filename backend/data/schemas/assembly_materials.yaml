@@ -1,0 +1,13 @@
+table: assembly_materials
+columns:
+  assembly_id:
+    type: uuid
+    primary_key: true
+    foreign_key: assemblies.id
+  material_id:
+    type: uuid
+    primary_key: true
+    foreign_key: materials.id
+  quantity:
+    type: float
+    default: 1.0

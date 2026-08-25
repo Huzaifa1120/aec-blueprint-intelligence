@@ -1,0 +1,15 @@
+table: drawings
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  project_id:
+    type: uuid
+    foreign_key: projects.id
+  discipline:
+    type: varchar(100)
+    nullable: true
+  sheet_number:
+    type: varchar(50)
+    nullable: true

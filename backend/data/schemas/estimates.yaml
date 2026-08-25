@@ -1,0 +1,31 @@
+table: estimates
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  project_id:
+    type: uuid
+    foreign_key: projects.id
+  total_material_cost:
+    type: float
+    default: 0.0
+  total_labor_cost:
+    type: float
+    default: 0.0
+  total_cost:
+    type: float
+    default: 0.0
+  data_quality_json:
+    type: text
+    nullable: true
+    default: null
+  scale_status:
+    type: varchar(20)
+    nullable: true
+  source_quality:
+    type: varchar(20)
+    default: layered_vector
+  source_pdf_path:
+    type: varchar(500)
+    nullable: true

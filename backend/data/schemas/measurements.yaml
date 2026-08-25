@@ -1,0 +1,38 @@
+table: measurements
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  component_id:
+    type: uuid
+    foreign_key: components.id
+    nullable: true
+  route_id:
+    type: uuid
+    foreign_key: routes.id
+    nullable: true
+  space_id:
+    type: uuid
+    foreign_key: spaces.id
+    nullable: true
+  source_sheet:
+    type: varchar(200)
+  source_region:
+    type: varchar(500)
+  measurement_type:
+    type: varchar(50)
+  raw_value:
+    type: float
+  final_value:
+    type: float
+    nullable: true
+  confidence_status:
+    type: varchar(20)
+    default: MEASURED
+  calculation_method:
+    type: varchar(100)
+    nullable: true
+  rule_version:
+    type: varchar(50)
+    nullable: true

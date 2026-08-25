@@ -1,0 +1,28 @@
+table: text_annotations
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  sheet_id:
+    type: uuid
+    foreign_key: sheets.id
+  text:
+    type: text
+  bbox_json:
+    type: varchar(200)
+  ocg_layer:
+    type: varchar(100)
+    nullable: true
+  component_id:
+    type: uuid
+    foreign_key: components.id
+    nullable: true
+  route_id:
+    type: uuid
+    foreign_key: routes.id
+    nullable: true
+  space_id:
+    type: uuid
+    foreign_key: spaces.id
+    nullable: true

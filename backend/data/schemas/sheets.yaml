@@ -1,0 +1,21 @@
+table: sheets
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  drawing_id:
+    type: uuid
+    foreign_key: drawings.id
+  name:
+    type: varchar(200)
+    nullable: true
+  page_number:
+    type: integer
+    nullable: true
+  scale:
+    type: varchar(20)
+    nullable: true
+  source_quality:
+    type: varchar(20)
+    default: layered_vector

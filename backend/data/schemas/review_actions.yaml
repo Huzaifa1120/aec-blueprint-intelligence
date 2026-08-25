@@ -1,0 +1,28 @@
+table: review_actions
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  session_id:
+    type: uuid
+    foreign_key: review_sessions.id
+  item_id:
+    type: varchar(100)
+  action:
+    type: varchar(20)
+  confidence_tier:
+    type: varchar(20)
+  boq_item_id:
+    type: uuid
+    foreign_key: boq_items.id
+    nullable: true
+  reason:
+    type: text
+    nullable: true
+  corrected_value:
+    type: float
+    nullable: true
+  created_at:
+    type: datetime
+    default: func.now

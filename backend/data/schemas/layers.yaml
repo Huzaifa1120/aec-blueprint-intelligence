@@ -1,0 +1,16 @@
+table: layers
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  sheet_id:
+    type: uuid
+    foreign_key: sheets.id
+  ocg_name:
+    type: varchar(100)
+  classified_discipline:
+    type: varchar(50)
+  human_override_discipline:
+    type: varchar(50)
+    nullable: true

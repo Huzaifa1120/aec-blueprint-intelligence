@@ -1,0 +1,15 @@
+table: reexport_requests
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  drawing_id:
+    type: uuid
+    foreign_key: drawings.id
+    nullable: true
+  message:
+    type: varchar(1000)
+  requested_at:
+    type: datetime
+    default: func.now

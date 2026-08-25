@@ -1,0 +1,31 @@
+table: components
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  sheet_id:
+    type: uuid
+    foreign_key: sheets.id
+  component_type:
+    type: varchar(100)
+  source_layer:
+    type: varchar(100)
+    nullable: true
+  x:
+    type: float
+  y:
+    type: float
+  confidence_status:
+    type: varchar(20)
+    default: MEASURED
+  confidence_score:
+    type: float
+    default: 1.0
+  layer_id:
+    type: uuid
+    foreign_key: layers.id
+    nullable: true
+  source_quality:
+    type: varchar(20)
+    default: layered_vector

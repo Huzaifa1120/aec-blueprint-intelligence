@@ -1,0 +1,38 @@
+table: boq_items
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  measurement_id:
+    type: uuid
+    foreign_key: measurements.id
+  estimate_id:
+    type: uuid
+    foreign_key: estimates.id
+  quantity:
+    type: float
+  unit_cost:
+    type: float
+  total_cost:
+    type: float
+  derivation_json:
+    type: varchar(2000)
+    nullable: true
+    default: null
+  size_source:
+    type: varchar(20)
+    nullable: true
+    default: null
+  source_bbox_json:
+    type: text
+    nullable: true
+    default: null
+  confidence_status:
+    type: varchar(20)
+    nullable: true
+    default: null
+  confidence_score:
+    type: float
+    nullable: true
+    default: null

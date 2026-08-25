@@ -1,0 +1,17 @@
+table: projects
+columns:
+  id:
+    type: uuid
+    primary_key: true
+    default: uuid4
+  name:
+    type: varchar(200)
+  owner:
+    type: varchar(200)
+    nullable: true
+  consultant:
+    type: varchar(200)
+    nullable: true
+  currency:
+    type: varchar(3)
+    default: USD
