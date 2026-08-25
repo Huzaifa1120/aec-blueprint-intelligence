@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import json
 
-from app.db.models.estimate import Estimate
+from sqlalchemy.orm import object_session
+
+from app.db.models.estimate import BoqItem, Estimate
+from app.db.models.review import ReviewAction
 
 
 def parse_json_object(raw: str | None) -> dict | None:
@@ -38,6 +41,39 @@ def material_name(derivation: dict, measurement: object) -> str:
     component = getattr(measurement, "component", None)
     component_type = getattr(component, "component_type", None)
     return component_type or getattr(measurement, "measurement_type", None) or "unnamed item"
+
+
+def corrections_from_estimate(estimate: Estimate) -> list[dict]:
+    """Review actions linked to this estimate's BOQ items (spec v3 §7.13).
+
+    Joined ``ReviewAction.boq_item_id → BoqItem.estimate_id`` so only actions
+    attributable to this estimate appear; material_name follows the same
+    derivation_json pattern as the row builder.
+    """
+    session = object_session(estimate)
+    if session is None:
+        return []
+    pairs = (
+        session.query(ReviewAction, BoqItem)
+        .join(BoqItem, ReviewAction.boq_item_id == BoqItem.id)
+        .filter(BoqItem.estimate_id == estimate.id)
+        .order_by(ReviewAction.created_at, ReviewAction.id)
+        .all()
+    )
+    corrections: list[dict] = []
+    for action, item in pairs:
+        derivation = parse_json_object(item.derivation_json) or {}
+        corrections.append(
+            {
+                "item_id": str(action.boq_item_id),
+                "material_name": material_name(derivation, item.measurement),
+                "action": action.action,
+                "reason": action.reason,
+                "corrected_value": action.corrected_value,
+                "date": action.created_at.isoformat() if action.created_at else None,
+            }
+        )
+    return corrections
 
 
 def payload_from_estimate(estimate: Estimate) -> dict:
@@ -98,6 +134,7 @@ def payload_from_estimate(estimate: Estimate) -> dict:
             "status": estimate.scale_status,
         },
         "data_quality": data_quality,
+        "corrections": corrections_from_estimate(estimate),
         "routes": routes,
         "materials": materials,
     }
