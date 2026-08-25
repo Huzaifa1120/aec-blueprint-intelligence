@@ -647,7 +647,6 @@ def e2e_run(
                             derivation=mat.get("derivation"),
                             size_source=None,
                             rule_version=rule.get("rule_version"),
-                            scale_assumed=(scale_status == "assumed"),
                             source=_source_block(
                                 comp.get("page"), comp.get("bbox")
                             ),

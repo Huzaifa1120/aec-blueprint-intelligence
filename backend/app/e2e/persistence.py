@@ -303,7 +303,6 @@ def _persist_component_boq(
     source_quality: str,
     rule_version: str,
     *,
-    scale_status: str | None = None,
     source: dict | None = None,
 ) -> None:
     """Derive and persist the material lines for one counted symbol type."""
@@ -329,11 +328,13 @@ def _persist_component_boq(
     if not materials:
         return
 
-    # Live tier exactly as the response carried it (T3 ruling): count-based
-    # lines downgrade under an assumed sheet scale like every other line.
+    # Live tier exactly as the response carried it (T3 ruling). T3 carve-out:
+    # component quantities are count × rule multiplier — scale-independent by
+    # construction — so counted lines never take the assumed-scale downgrade
+    # (neither does the live response's component call site).
     tier, score = live_confidence_tier(
         size_source=None,
-        scale_assumed=(scale_status == "assumed"),
+        scale_assumed=False,
         source_quality=source_quality,
         rule_version=applied.get("rule_version"),
     )
@@ -561,7 +562,6 @@ def persist_extraction(
                 row.confidence_status,
                 extraction.source_quality,
                 extraction.rule_version,
-                scale_status=extraction.scale_status,
                 source=_source_region(row.page, row.bbox),
             )
         consumed[key] += 1

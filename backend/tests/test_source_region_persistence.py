@@ -12,8 +12,9 @@ Runs the synthetic plumbing/fire fixture through POST /api/e2e/run?persist=true
 - legacy tolerance: a row whose ``source_bbox_json`` was nulled reads back as
   ``"source": None`` — never a payload-builder crash;
 - T3-review ruling: persisted ``BoqItem.confidence_status``/``confidence_score``
-  equal the tiers the live response carried, for both the route-derived
-  (DERIVED) path and an assumed-scale (ASSUMED) run.
+  equal the tiers the live response carried — including the T3 carve-out that
+  counted components (scale-independent by construction) stay DERIVED while
+  length-driven routes go ASSUMED under an assumed sheet scale.
 """
 
 from __future__ import annotations
@@ -72,11 +73,34 @@ def _route_lines(body: dict) -> list[dict]:
     ]
 
 
+def _component_lines(body: dict) -> list[dict]:
+    """Response BOQ lines quantified by the count loop."""
+    return [
+        ln
+        for ln in body["boq_items"]
+        if ln.get("assembly_type") not in ROUTE_ASSEMBLIES
+    ]
+
+
 def _line_key(ln: dict) -> tuple:
     """Comparable identity of one BOQ line across response and persistence."""
     return (
         ln["material_name"],
         round(float(ln["quantity"]), 3),
+        ln["confidence_status"],
+        round(float(ln["confidence_score"]), 4),
+    )
+
+
+def _tier_key(ln: dict) -> tuple:
+    """Tier identity of one BOQ line, ignoring quantity.
+
+    Persistence aggregates counted components per type (one Measurement per
+    assembly type), so component quantities legitimately differ between the
+    per-instance response lines and the persisted rows — tiers must not.
+    """
+    return (
+        ln["material_name"],
         ln["confidence_status"],
         round(float(ln["confidence_score"]), 4),
     )
@@ -199,7 +223,7 @@ def test_legacy_null_source_reads_back_as_none(client, plumbing_run):
 
 
 # ---------------------------------------------------------------------------
-# T3-review ruling: assumed-scale run persists ASSUMED everywhere
+# T3-review ruling: assumed-scale run — routes ASSUMED, components stay DERIVED
 # ---------------------------------------------------------------------------
 def test_assumed_scale_persists_response_tier(client, tmp_path, monkeypatch):
     build_plumbing_fire_fixture(str(tmp_path / "plumbing_fire_assumed.pdf"))
@@ -217,8 +241,18 @@ def test_assumed_scale_persists_response_tier(client, tmp_path, monkeypatch):
     body = response.json()
     assert body["scale"]["status"] == "assumed"
     assert body["boq_items"], "expected BOQ lines under assumed scale"
-    assert all(ln["confidence_status"] == "ASSUMED" for ln in body["boq_items"])
-    assert all(float(ln["confidence_score"]) == 0.3 for ln in body["boq_items"])
+
+    # T3 carve-out: routes rest on scale-derived lengths → ASSUMED (0.3);
+    # counted components are count × rule multiplier, scale-independent by
+    # construction → stay DERIVED.
+    response_routes = _route_lines(body)
+    response_components = _component_lines(body)
+    assert response_routes and response_components
+    assert {ln["confidence_status"] for ln in response_routes} == {"ASSUMED"}
+    assert {round(float(ln["confidence_score"]), 4) for ln in response_routes} == {
+        0.3
+    }
+    assert {ln["confidence_status"] for ln in response_components} == {"DERIVED"}
 
     boq = client.get(f"/api/estimates/{body['estimate_id']}/boq").json()
     assert boq["scale"]["status"] == "assumed"
@@ -231,11 +265,16 @@ def test_assumed_scale_persists_response_tier(client, tmp_path, monkeypatch):
             .all()
         )
     assert items
-    assert {item.confidence_status for item in items} == {"ASSUMED"}
-    assert {round(float(item.confidence_score), 4) for item in items} == {0.3}
+    # Persisted tiers mirror the live response on both carve-out sides.
+    assert all(item.confidence_status != "MEASURED" for item in items)
+    assert {item.confidence_status for item in items} == {"ASSUMED", "DERIVED"}
 
-    response_routes = _route_lines(body)
-    assert response_routes
+    # Per-line parity per granularity: routes line-for-line (incl. quantity);
+    # components per distinct material/tier/score (persistence aggregates
+    # counted components per type, so quantities legitimately differ).
     assert sorted(map(_line_key, response_routes)) == sorted(
         map(_line_key, boq["routes"])
+    )
+    assert set(map(_tier_key, response_components)) == set(
+        map(_tier_key, boq["materials"])
     )
