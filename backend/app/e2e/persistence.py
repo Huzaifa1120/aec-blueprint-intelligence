@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session as OrmSession
 
 from app.assembly.formulas import FormulaValidationError
 from app.assembly.rules import apply_assembly, load_assembly_rule
-from app.catalog.prices import compute_boq_item
+from app.catalog.prices import compute_boq_item, compute_labor_cost
 from app.core.config import get_settings
 from app.db.models.estimate import BoqItem, Estimate, Measurement
 from app.db.models.extraction import Layer, ScheduleBlock, TextAnnotation
@@ -299,6 +299,25 @@ def _persist_route_boq(
             confidence_score=score,
         )
 
+    # One extra BOQ line per rule-with-labor (spec v3 §7.14): same
+    # measurement/tier treatment as the material lines above.
+    labor_payload = labor_line_payload(rule_dict, assembly, applied, rule_version)
+    if labor_payload is not None:
+        _add_boq_item(
+            db,
+            estimate,
+            measurement,
+            labor_payload["material_name"],
+            float(applied.get("labor_hours") or 0.0),
+            labor_payload,
+            source_quality,
+            size_source,
+            source=source,
+            confidence_status=tier,
+            confidence_score=score,
+            labor_payload=labor_payload,
+        )
+
 
 def _persist_component_boq(
     db: OrmSession,
@@ -382,6 +401,54 @@ def _persist_component_boq(
             confidence_score=score,
         )
 
+    # One extra BOQ line per rule-with-labor, scaled by the type's count
+    # exactly like the material lines (spec v3 §7.14).
+    labor_payload = labor_line_payload(rule, resolved_type, applied, rule_version)
+    if labor_payload is not None:
+        _add_boq_item(
+            db,
+            estimate,
+            measurement,
+            labor_payload["material_name"],
+            float(applied.get("labor_hours") or 0.0) * count,
+            labor_payload,
+            source_quality,
+            None,
+            source=source,
+            confidence_status=tier,
+            confidence_score=score,
+            labor_payload=labor_payload,
+        )
+
+
+def labor_line_payload(
+    rule_dict: dict | None,
+    assembly: str,
+    applied: dict,
+    fallback_version: str | None,
+) -> dict | None:
+    """Labor BOQ payload for one applied assembly (spec v3 §7.14).
+
+    Returns None when the rule bills no hours (missing/zero
+    ``installation_hours`` or no labor block). Shared by this module and
+    ``app.e2e.router`` so response and persisted labor lines carry identical
+    provenance. ``rate_source`` is stamped at pricing time; replay treats the
+    resulting derivation as an unrecognized branch — unchecked-honest.
+    """
+    hours = float(applied.get("labor_hours") or 0.0)
+    labor = (rule_dict or {}).get("labor") or {}
+    if not labor or hours <= 0:
+        return None
+    category = labor.get("category")
+    return {
+        "material_name": f"labor:{category or assembly}",
+        "unit": "hour",
+        "rule_name": assembly,
+        "rule_version": str(applied.get("rule_version") or fallback_version or ""),
+        "category": category,
+        "hourly_rate": labor.get("hourly_rate"),
+    }
+
 
 def _add_boq_item(
     db: OrmSession,
@@ -396,16 +463,45 @@ def _add_boq_item(
     source: dict | None = None,
     confidence_status: str | None = None,
     confidence_score: float | None = None,
+    labor_payload: dict | None = None,
 ) -> None:
-    boq = compute_boq_item(quantity, material_name, db)
-    if boq.get("unpriced"):
-        payload["unpriced"] = True
+    """Persist one BOQ row.
+
+    Material rows price through the catalog (unpriced-flag on gaps). Labor
+    rows (``labor_payload`` set) price via ``compute_labor_cost`` with the
+    same flag pattern and stamp ``rate_source`` into the derivation payload.
+    """
+    unit_price: float | None
+    total_cost_value: float | None
+    if labor_payload is not None:
+        costing = compute_labor_cost(
+            db,
+            labor_payload.get("category"),
+            float(quantity),
+            labor_payload.get("hourly_rate"),
+        )
+        unit_price = costing["unit_rate"]
+        total_cost_value = costing["total_cost"]
+        if costing["unpriced"]:
+            payload["unpriced"] = True
+        payload["labor"] = {
+            "category": labor_payload.get("category"),
+            "rate_source": costing["rate_source"],
+        }
+        payload.pop("category", None)
+        payload.pop("hourly_rate", None)
+    else:
+        boq = compute_boq_item(quantity, material_name, db)
+        unit_price = boq.get("unit_price")
+        total_cost_value = boq.get("total_cost")
+        if boq.get("unpriced"):
+            payload["unpriced"] = True
     item = BoqItem(
         measurement_id=measurement.id,
         estimate_id=estimate.id,
         quantity=quantity,
-        unit_cost=float(boq.get("unit_price") or 0.0),
-        total_cost=float(boq.get("total_cost") or 0.0),
+        unit_cost=float(unit_price or 0.0),
+        total_cost=float(total_cost_value or 0.0),
         derivation_json=json.dumps(payload),
         size_source=size_source,
         # Click-through region + live tier, mirroring the API response
@@ -416,6 +512,41 @@ def _add_boq_item(
         confidence_score=confidence_score,
     )
     db.add(item)
+
+
+def _set_estimate_totals(db: OrmSession, estimate: Estimate) -> None:
+    """Classify persisted rows into material vs labor totals (spec v3 §7.14).
+
+    grand == Σ priced material + Σ priced labor. Unpriced rows — flagged in
+    derivation_json — contribute to neither total (their cost columns hold
+    0.0 only because the schema is non-nullable).
+    """
+    rows = (
+        db.query(BoqItem)
+        .filter(BoqItem.estimate_id == estimate.id)
+        .with_entities(BoqItem.total_cost, BoqItem.derivation_json)
+        .all()
+    )
+    material_total = 0.0
+    labor_total = 0.0
+    for total_cost, raw_derivation in rows:
+        value = float(total_cost or 0.0)
+        try:
+            derivation = json.loads(raw_derivation) if raw_derivation else {}
+        except ValueError:
+            derivation = {}
+        is_priced_labor = (
+            isinstance(derivation, dict)
+            and "labor" in derivation
+            and not derivation.get("unpriced")
+        )
+        if is_priced_labor:
+            labor_total += value
+        else:
+            material_total += value
+    estimate.total_material_cost = round(material_total, 2)
+    estimate.total_labor_cost = round(labor_total, 2)
+    estimate.total_cost = round(material_total + labor_total, 2)
 
 
 def persist_extraction(
@@ -589,14 +720,8 @@ def persist_extraction(
             annotation.route_id = route_rows[row.route_index].id
     db.flush()
 
-    total_material = (
-        db.query(BoqItem)
-        .filter(BoqItem.estimate_id == estimate.id)
-        .with_entities(BoqItem.total_cost)
-        .all()
-    )
-    estimate.total_material_cost = round(sum(float(t[0] or 0.0) for t in total_material), 2)
-    estimate.total_labor_cost = 0.0
-    estimate.total_cost = estimate.total_material_cost
+    # Totals split material vs labor; unpriced rows contribute to neither
+    # (spec v3 §7.14 — the flag, never a $0 price, reports the gap).
+    _set_estimate_totals(db, estimate)
     db.commit()
     return estimate.id

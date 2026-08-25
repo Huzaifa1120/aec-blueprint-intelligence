@@ -52,7 +52,11 @@ from app.e2e.extraction import (
     SheetExtraction,
 )
 from app.e2e.data_quality import DataQuality
-from app.e2e.persistence import live_confidence_tier, persist_extraction
+from app.e2e.persistence import (
+    labor_line_payload,
+    live_confidence_tier,
+    persist_extraction,
+)
 from app.ingestion.router import classify_upload
 from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, _scale_denominator, parse_pdf
 from app.parsing.scale import resolve_scale
@@ -66,7 +70,7 @@ from app.parsing.layer_map import layer_to_assembly, route_layers
 from app.parsing.text_walker import associate_text, probe_span_ocgs
 from app.assembly.formulas import FormulaValidationError
 from app.assembly.rules import apply_assembly, load_assembly_rule
-from app.catalog.prices import compute_boq_item
+from app.catalog.prices import compute_boq_item, compute_labor_cost
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -111,6 +115,7 @@ def _boq_line(
     rule_version: Optional[str] = None,
     scale_assumed: bool = False,
     source: Optional[Dict[str, Any]] = None,
+    labor_payload: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build one BOQ line with its live confidence tier (spec v3 §7.12).
 
@@ -119,8 +124,36 @@ def _boq_line(
     DERIVED by default (calculated via assembly rule from measured input)
     and downgraded to ASSUMED when the size cascade assumed it or the sheet
     scale was assumed.
+
+    Labor lines (``labor_payload`` set, spec v3 §7.14) price through
+    ``compute_labor_cost`` instead of the material catalog — same tier
+    treatment, ``unit="hour"``, ``rate_source`` stamped in the derivation.
     """
-    boq = compute_boq_item(quantity, material_name, db)
+    unit: Optional[str] = None
+    if labor_payload is not None:
+        costing = compute_labor_cost(
+            db,
+            labor_payload.get("category"),
+            quantity,
+            labor_payload.get("hourly_rate"),
+        )
+        unit_price: Optional[float] = costing["unit_rate"]
+        total_cost: Optional[float] = costing["total_cost"]
+        unpriced: bool = costing["unpriced"]
+        derivation = {
+            "labor": {
+                "category": labor_payload.get("category"),
+                "rate_source": costing["rate_source"],
+            },
+            "rule_name": assembly_type,
+            "rule_version": rule_version,
+        }
+        unit = "hour"
+    else:
+        boq = compute_boq_item(quantity, material_name, db)
+        unit_price = boq.get("unit_price")
+        total_cost = boq.get("total_cost")
+        unpriced = boq.get("unpriced", False)
 
     # Shared with the persistence spine so a replayed estimate reads exactly
     # these tiers (T3-review ruling).
@@ -130,13 +163,13 @@ def _boq_line(
         source_quality=source_quality,
         rule_version=rule_version,
     )
-    return {
+    line = {
         "assembly_type": assembly_type,
         "material_name": material_name,
         "quantity": round(quantity, 3),
-        "unit_price": boq.get("unit_price"),
-        "total_cost": boq.get("total_cost"),
-        "unpriced": boq.get("unpriced", False),
+        "unit_price": unit_price,
+        "total_cost": total_cost,
+        "unpriced": unpriced,
         "confidence_status": tier,
         "confidence_score": score,
         "source_quality": source_quality,
@@ -145,6 +178,9 @@ def _boq_line(
         "derivation": derivation,
         "size_source": size_source,
     }
+    if unit is not None:
+        line["unit"] = unit
+    return line
 
 
 def _adapt_spans_for_cascade(raw_text_spans: List[Dict]) -> List[Dict]:
@@ -602,6 +638,33 @@ def e2e_run(
                             ),
                         )
                     )
+                # One extra BOQ line per rule-with-labor (spec v3 §7.14) —
+                # same tier treatment as the material lines above.
+                labor_payload = labor_line_payload(
+                    load_assembly_rule(assembly_type),
+                    assembly_type,
+                    applied,
+                    applied.get("rule_version"),
+                )
+                if labor_payload is not None:
+                    boq_items.append(
+                        _boq_line(
+                            assembly_type,
+                            labor_payload["material_name"],
+                            float(applied.get("labor_hours") or 0.0),
+                            route.get("confidence_status", "MEASURED"),
+                            route.get("source_path_ids", []),
+                            db,
+                            source_quality=source_quality,
+                            size_source=size_source,
+                            rule_version=applied.get("rule_version"),
+                            scale_assumed=(scale_status == "assumed"),
+                            source=_source_block(
+                                route.get("page"), route.get("bbox")
+                            ),
+                            labor_payload=labor_payload,
+                        )
+                    )
 
             # Component BOQ: one assembly instance per counted symbol
             # Enforce strict 1-to-1 layer-to-assembly matching (Phase 2 rule).
@@ -651,6 +714,30 @@ def e2e_run(
                             source=_source_block(
                                 comp.get("page"), comp.get("bbox")
                             ),
+                        )
+                    )
+                # One extra labor line per counted instance, scaled by the
+                # cluster count exactly like the material lines (spec v3
+                # §7.14); persistence aggregates the same hours per type.
+                labor_payload = labor_line_payload(
+                    rule, resolved_type, applied, rule.get("rule_version")
+                )
+                if labor_payload is not None:
+                    boq_items.append(
+                        _boq_line(
+                            resolved_type,
+                            labor_payload["material_name"],
+                            float(applied.get("labor_hours") or 0.0) * comp["count"],
+                            comp.get("confidence_status", "MEASURED"),
+                            comp.get("source_path_ids", []),
+                            db,
+                            source_quality=source_quality,
+                            size_source=None,
+                            rule_version=rule.get("rule_version"),
+                            source=_source_block(
+                                comp.get("page"), comp.get("bbox")
+                            ),
+                            labor_payload=labor_payload,
                         )
                     )
 

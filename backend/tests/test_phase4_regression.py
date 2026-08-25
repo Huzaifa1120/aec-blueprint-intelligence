@@ -92,7 +92,13 @@ def test_plumbing_fire_fixture_end_to_end():
     cw_rows = [i for i in boq if i["assembly_type"] == "water_supply"]
     assert cw_rows, "cold-water main produced no BOQ"
     assert all(i["size_source"] == "fixture_units" for i in cw_rows)
-    derivations = [i["derivation"]["inputs"] for i in cw_rows if i.get("derivation")]
+    # contract change: labor lines 2026-08-25 — the water_supply labor row
+    # has no derivation inputs; size provenance assertions cover materials.
+    derivations = [
+        i["derivation"]["inputs"]
+        for i in cw_rows
+        if i.get("derivation") and "labor" not in i["derivation"]
+    ]
     assert derivations
     assert all(inp["diameter_mm"] == 40.0 for inp in derivations)
     assert _pipe_qty(boq, "water_supply", "supply_pipe_m") == pytest.approx(
