@@ -213,6 +213,7 @@ def measure_routes(
     raw_drawings: List[Dict],
     scale: str,
     route_layer_names: Tuple[str, ...] = ("CONDUIT", "CABLE_TRAY", "PIPE"),
+    stats: Optional[Dict[str, int]] = None,
 ) -> List[RouteGeo]:
     """Measure cable trunk / conduit lengths from clustered route-layer paths.
 
@@ -220,6 +221,11 @@ def measure_routes(
     route candidate: with union-find clustering (spec v3 §7.4) there is no
     noise concept, and tray/conduit polylines legitimately form single-path
     clusters. Dedup by source_path_ids still applies downstream.
+
+    Route candidates that cannot produce a measurable polyline (no
+    extractable points, or fewer than 2 distinct points — e.g. a zero-length
+    vent stub) are skipped and tallied in ``stats["degenerate_skipped"]``
+    when a stats dict is supplied, so they never vanish silently.
 
     For each route-layer cluster, extract the paths' polyline,
     compute length using the detected scale, and return RouteGeo objects.
@@ -230,6 +236,8 @@ def measure_routes(
     - Source path IDs preserved for traceability
     - confidence_status default "MEASURED", score 1.0
     """
+    if stats is None:
+        stats = {}
     measured_routes: List[RouteGeo] = []
 
     # Build a lookup: path_id → drawing path dict
@@ -280,11 +288,13 @@ def measure_routes(
                     polyline_parts.append((px, py))
 
         if len(polyline_parts) < 2:
+            stats["degenerate_skipped"] = stats.get("degenerate_skipped", 0) + 1
             continue
         # Degenerate cluster (all points identical, e.g. a zero-length vent
         # stub): fewer than 2 DISTINCT points is no measurable route — skip
         # instead of emitting a qty-0 BOQ row.
         if len(set(polyline_parts)) < 2:
+            stats["degenerate_skipped"] = stats.get("degenerate_skipped", 0) + 1
             continue
 
         # No coordinate sorting here: a lexicographic (x, y) sort destroys

@@ -47,13 +47,21 @@ def accumulate_fixture_units(
     route_polyline: List[Tuple[float, float]],
     components: List[Dict],
     corridor_pt: float = 24.0,
+    stats: Optional[Dict[str, int]] = None,
 ) -> Tuple[float, List[Dict]]:
-    """Sum fixture units of components within corridor_pt of the polyline."""
+    """Sum fixture units of components within corridor_pt of the polyline.
+
+    Components beyond the corridor are excluded from the total and tallied
+    in ``stats["fu_corridor_excluded"]`` when a stats dict is supplied.
+    """
+    if stats is None:
+        stats = {}
     total = 0.0
     breakdown: List[Dict] = []
     for comp in components:
         d = _point_to_polyline_distance(float(comp["x"]), float(comp["y"]), route_polyline)
         if d > corridor_pt:
+            stats["fu_corridor_excluded"] = stats.get("fu_corridor_excluded", 0) + 1
             continue
         fu = fixture_units_for_type(str(comp.get("component_type") or ""))
         if fu <= 0.0:

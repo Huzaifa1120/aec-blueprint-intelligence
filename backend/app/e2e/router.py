@@ -50,6 +50,7 @@ from app.e2e.extraction import (
     RouteRow,
     SheetExtraction,
 )
+from app.e2e.data_quality import DataQuality
 from app.e2e.persistence import persist_extraction
 from app.ingestion.router import classify_upload
 from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, _scale_denominator, parse_pdf
@@ -309,6 +310,7 @@ def resolve_route_context(
     route_index: int,
     *,
     settings: "Settings",
+    stats: Optional[Dict[str, int]] = None,
 ) -> Optional[Tuple[Dict, Optional[str], Optional[Dict]]]:
     """Cascade + fittings + FU for one sized route.
 
@@ -337,7 +339,7 @@ def resolve_route_context(
             if c.get("assembly_type")
         ]
         fu_total, breakdown = accumulate_fixture_units(
-            polyline, fu_comps, corridor_pt=settings.fu_corridor_pt
+            polyline, fu_comps, corridor_pt=settings.fu_corridor_pt, stats=stats
         )
         gauge = mech_rule.get("fixture_unit_gauge") or {}
         if fu_total > 0.0 and gauge:
@@ -427,10 +429,16 @@ def e2e_run(
         tmp_path = tmp.name
 
     try:
+        dq = DataQuality()
+
         # 1️⃣ Classify
         try:
             classify_result = classify_upload(tmp_path)
         except Exception:
+            dq.classifier_errors += 1
+            logger.exception(
+                "classify_upload failed; degrading upload to the raster path"
+            )
             classify_result = {"status": "raster"}
 
         if classify_result.get("status") != "vector":
@@ -441,6 +449,7 @@ def e2e_run(
                 "status": "raster",
                 "detail": "PDF classified as raster; vector pipeline skipped.",
                 "scale": {"value": assumed.scale_str, "status": assumed.status},
+                "data_quality": dq.as_dict(),
             }
 
         source_quality = classify_result.get("source_quality", "layered_vector")
@@ -459,7 +468,11 @@ def e2e_run(
 
         # 3️⃣ Measure routes (length-based assemblies: tray, conduit, ducts, pipes)
         route_layer_names = tuple(route_layers())
-        routes = measure_routes(clusters, raw_drawings, scale, route_layer_names)
+        route_stats: Dict[str, int] = {}
+        routes = measure_routes(
+            clusters, raw_drawings, scale, route_layer_names, stats=route_stats
+        )
+        dq.degenerate_skipped += route_stats.get("degenerate_skipped", 0)
         # Resolved cross-section sizes aligned with `routes` by index —
         # reused when projecting a SheetExtraction for persistence.
         route_sizes: List[Dict | None] = [None] * len(routes)
@@ -475,6 +488,7 @@ def e2e_run(
         )
         components = [c for c in all_components if c["assembly_type"] is not None]
         unmapped_components = [c for c in all_components if c["assembly_type"] is None]
+        dq.unmapped_count += len(unmapped_components)
         # Extraction order: mapped first, then UNMAPPED appended — text
         # annotation component_index values refer into this combined list.
         extraction_components = components + unmapped_components
@@ -490,17 +504,21 @@ def e2e_run(
                 # Use resolved layer assembly if available, fall back to route type
                 assembly_type = resolved_assembly if resolved_assembly else route.get("type", "")
                 if assembly_type not in ROUTE_ASSEMBLIES:
+                    dq.dropped_routes += 1
                     continue
 
                 variables = None
                 size_source = None
                 if assembly_type in SIZED_ASSEMBLIES:
+                    fu_stats: Dict[str, int] = {}
                     ctx = resolve_route_context(
                         assembly_type, route, cascade_spans, scale,
                         schedule_rows, extraction_components, routes,
-                        route_index, settings=get_settings(),
+                        route_index, settings=get_settings(), stats=fu_stats,
                     )
+                    dq.fu_corridor_excluded += fu_stats.get("fu_corridor_excluded", 0)
                     if ctx is None:
+                        dq.dropped_routes += 1
                         logger.warning(
                             "dropping %s route (%.3f m): no resolvable "
                             "cross-section size and no configured default",
@@ -518,6 +536,7 @@ def e2e_run(
                 try:
                     applied = apply_assembly(assembly_type, variables=variables)
                 except FormulaValidationError as exc:
+                    dq.dropped_routes += 1
                     logger.warning(
                         "dropping %s route (%.3f m): assembly rule failed (%s)",
                         assembly_type,
@@ -561,11 +580,13 @@ def e2e_run(
                 # (formula needs per-route size variables); a duct/pipe
                 # cluster surfacing here is geometry, not a countable symbol.
                 if resolved_type in SIZED_ASSEMBLIES:
+                    dq.dropped_symbols += 1
                     continue
 
                 rule = load_assembly_rule(resolved_type)
                 if rule is None or resolved_type != rule.get("name", resolved_type):
                     # STRICT SKIP: never apply an unrelated rule to a component
+                    dq.dropped_symbols += 1
                     continue
 
                 # Fail-closed like persistence: one broken rule drops that
@@ -573,6 +594,7 @@ def e2e_run(
                 try:
                     applied = apply_assembly(resolved_type)
                 except FormulaValidationError as exc:
+                    dq.dropped_symbols += 1
                     logger.warning(
                         "dropping %s symbols (count path): assembly rule "
                         "failed (%s)",
@@ -635,6 +657,7 @@ def e2e_run(
             "schedule_blocks_count": len(extraction.schedule_blocks),
             "text_annotations_count": len(extraction.text_annotations),
             "unmapped_items": _aggregate_unmapped(unmapped_components),
+            "data_quality": dq.as_dict(),
         }
         if persist and estimate_id is not None:
             response["estimate_id"] = str(estimate_id)
