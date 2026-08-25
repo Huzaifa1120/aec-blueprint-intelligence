@@ -44,12 +44,15 @@ python -m ruff format app tests                        # formatter
 Frontend — run from `frontend/`:
 
 ```bash
-npm run dev         # Turbopack dev server, http://localhost:3000
-npm run lint        # eslint
-npm run typecheck   # tsc --noEmit (build also typechecks)
-npm run build       # production build = compile + typecheck
-npm run format      # prettier write
-npm run format:check
+bun install         # package manager is Bun (≥1.4); lockfile = bun.lock — no package-lock.json
+bun run dev         # Turbopack dev server, http://localhost:3000
+bun run lint        # eslint
+bun run typecheck   # tsc --noEmit (build also typechecks)
+bun run build       # production build = compile + typecheck
+bun run format      # prettier write
+bun run format:check
+bun run test:e2e     # Playwright e2e, mocked API (no backend needed)
+bun run test:e2e:live # same specs vs real backend — start uvicorn :8000 first
 ```
 
 Frontend calls the backend at `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`). The two dev servers run independently.

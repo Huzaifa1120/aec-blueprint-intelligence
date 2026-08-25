@@ -22,4 +22,4 @@
 
 ## 4. Frontend / Next.js Traps
 *   **Next.js Breaking Changes:** The frontend stack uses React 19 and a major Next.js version with breaking changes. Rely exclusively on `node_modules/next/dist/docs/` before writing Next.js code, and do not blindly trust older Next.js tutorials or generated code patterns.
-*   **Package Management:** The frontend utilizes Turbopack (`npm run dev`). Ensure strict TypeScript adherence (`npm run build`).
+*   **Package Management:** The frontend uses **Bun** as its package manager (`bun install`, `bun run dev`, `bun run build`); the lockfile is `bun.lock` — do not reintroduce `package-lock.json`. Ensure strict TypeScript adherence (`bun run build`).

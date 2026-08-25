@@ -22,9 +22,9 @@ fi
 
 if [ -n "$FE_CODE$FE_JSON" ]; then
   echo "[pre-commit] eslint + tsc + prettier (frontend)"
-  (cd "$ROOT/frontend" && npm run lint >/dev/null && npm run typecheck)
+  (cd "$ROOT/frontend" && bun run lint >/dev/null && bun run typecheck)
   if [ -n "$FE_CODE" ]; then
-    (cd "$ROOT/frontend" && npx prettier --check \
+    (cd "$ROOT/frontend" && bunx prettier --check \
       $(printf '%s\n' "$FE_CODE" $FE_JSON | sed 's|^frontend/||'))
   fi
 fi
