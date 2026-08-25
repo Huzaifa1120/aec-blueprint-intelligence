@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Literal
 import yaml
 from pathlib import Path
+from sqlalchemy import inspect
 
 
 @dataclass
@@ -29,3 +30,33 @@ class SchemaValidator:
             if data and "table" in data and "columns" in data:
                 schemas[data["table"]] = data
         return schemas
+
+    def validate_startup(self, engine) -> list[SchemaError]:
+        """Compare YAML schema vs actual DB. Returns list of discrepancies."""
+        errors: list[SchemaError] = []
+        inspector = inspect(engine)
+
+        for table_name, schema in self.schemas.items():
+            if not inspector.has_table(table_name):
+                errors.append(SchemaError(
+                    severity="error", table=table_name, column=None,
+                    issue="missing_table"
+                ))
+                continue
+
+            db_columns = {col["name"] for col in inspector.get_columns(table_name)}
+            yaml_columns = set(schema.get("columns", {}).keys())
+
+            for col in yaml_columns - db_columns:
+                errors.append(SchemaError(
+                    severity="error", table=table_name, column=col,
+                    issue="missing_column"
+                ))
+
+            for col in db_columns - yaml_columns:
+                errors.append(SchemaError(
+                    severity="warning", table=table_name, column=col,
+                    issue="extra_column"
+                ))
+
+        return errors

@@ -22,3 +22,20 @@ def test_load_schemas_returns_all_tables():
         "drawing_quality_assessments", "reexport_requests"
     }
     assert set(validator.schemas.keys()) == expected_tables
+
+
+def test_validate_startup_catches_missing_column():
+    """Validator catches a column in YAML but not in DB."""
+    from sqlalchemy import create_engine, text
+    from app.db.validator import SchemaValidator
+
+    engine = create_engine("sqlite:///:memory:")
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT)"))
+        conn.commit()
+
+    validator = SchemaValidator()
+    errors = validator.validate_startup(engine)
+
+    missing_cols = [e for e in errors if e.issue == "missing_column" and e.table == "projects"]
+    assert len(missing_cols) >= 1, f"Expected missing column errors, got {errors}"
