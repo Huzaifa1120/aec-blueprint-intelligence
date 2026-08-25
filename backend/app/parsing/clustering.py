@@ -81,6 +81,7 @@ def cluster_paths_threshold(
     layer: str,
     threshold_px: float,
     max_symbol_diagonal_px: float | None = None,
+    bucket_by_enlarged_bbox: bool = False,
 ) -> List[dict]:
     """Cluster symbol-scale paths of one layer by bbox gap ≤ threshold_px.
 
@@ -91,6 +92,14 @@ def cluster_paths_threshold(
     Filtering is order-preserving, so the sorted deterministic grouping of the
     remaining paths is unchanged.
 
+    ``bucket_by_enlarged_bbox`` (route tracing): place each path into every
+    grid cell its threshold-enlarged bbox overlaps instead of bucketing by
+    centroid. Centroid buckets only compare paths whose CENTROIDS sit within
+    one cell of each other — correct for compact symbols but blind to long
+    strips whose touching ends are far from their centroids. Enlarged-bbox
+    placement keeps the same ≤threshold_px merge rule while making elongated
+    geometry mutually visible; grouping remains deterministic.
+
     Args:
         paths: DrawingPath dicts (bbox + layer keys required).
         layer: layer name to cluster (``"default"`` catches layer-less paths).
@@ -98,6 +107,7 @@ def cluster_paths_threshold(
             :func:`derive_threshold_px`).
         max_symbol_diagonal_px: optional symbol-scale cutoff in points;
             larger paths are routed to route tracing instead.
+        bucket_by_enlarged_bbox: route-mode bucketing for elongated paths.
     """
     selected = [
         p
@@ -119,24 +129,44 @@ def cluster_paths_threshold(
         ]
     )
 
-    # Grid bucketing: cell size = threshold ⇒ only 3×3 neighbour cells matter.
+    # Grid bucketing: cell size = threshold ⇒ only nearby cells matter.
     cell = max(threshold_px, 1e-9)
     grid: Dict[Tuple[int, int], List[int]] = {}
-    for idx, (cx, cy) in enumerate(centroids):
-        grid.setdefault((int(cx // cell), int(cy // cell)), []).append(idx)
+    if bucket_by_enlarged_bbox:
+        for idx, p in enumerate(selected):
+            x0, y0, x1, y1 = p["bbox"]
+            gx0 = int((x0 - threshold_px) // cell)
+            gy0 = int((y0 - threshold_px) // cell)
+            gx1 = int((x1 + threshold_px) // cell)
+            gy1 = int((y1 + threshold_px) // cell)
+            for gx in range(gx0, gx1 + 1):
+                for gy in range(gy0, gy1 + 1):
+                    grid.setdefault((gx, gy), []).append(idx)
+    else:
+        for idx, (cx, cy) in enumerate(centroids):
+            grid.setdefault((int(cx // cell), int(cy // cell)), []).append(idx)
 
     uf = UnionFind(len(selected))
     offsets = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
-    for (gx, gy), members in grid.items():
-        for ox, oy in offsets:
-            neighbours = grid.get((gx + ox, gy + oy), [])
-            for i in members:
-                for j in neighbours:
-                    if (
-                        j > i
-                        and bbox_distance(selected[i]["bbox"], selected[j]["bbox"]) <= threshold_px
-                    ):
+    if bucket_by_enlarged_bbox:
+        # Enlarged placement already guarantees co-cell presence for any pair
+        # within threshold; compare each cell's members directly.
+        for members in grid.values():
+            for pos, i in enumerate(members):
+                for j in members[pos + 1 :]:
+                    if bbox_distance(selected[i]["bbox"], selected[j]["bbox"]) <= threshold_px:
                         uf.union(i, j)
+    else:
+        for (gx, gy), members in grid.items():
+            for ox, oy in offsets:
+                neighbours = grid.get((gx + ox, gy + oy), [])
+                for i in members:
+                    for j in neighbours:
+                        if (
+                            j > i
+                            and bbox_distance(selected[i]["bbox"], selected[j]["bbox"]) <= threshold_px
+                        ):
+                            uf.union(i, j)
 
     results: List[dict] = []
     for group_idx, group in enumerate(uf.groups()):

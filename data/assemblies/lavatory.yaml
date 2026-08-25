@@ -1,5 +1,9 @@
 name: lavatory
 rule_version: "1.0.0"
+legend_keywords:
+  - LAVATORY
+  - WASH BASIN
+  - BASIN
 bom:
   lavatory: 1
   pop_up_waste: 1

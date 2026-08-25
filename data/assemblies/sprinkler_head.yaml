@@ -1,5 +1,7 @@
 name: sprinkler_head
 rule_version: "1.0.0"
+legend_keywords:
+  - SPRINKLER
 bom:
   sprinkler_head: 1
   flexible_drops: 0

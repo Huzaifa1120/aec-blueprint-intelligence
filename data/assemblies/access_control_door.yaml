@@ -1,5 +1,11 @@
 name: access_control_door
 rule_version: "1.0.0"
+legend_keywords:
+  - CARD READER
+  - MAGNETIC LOCK
+  - PUSH BUTTON
+  - DOOR CONTROLLER
+  - ACCESS CONTROL
 bom:
   card_reader: 1
   magnetic_lock: 1

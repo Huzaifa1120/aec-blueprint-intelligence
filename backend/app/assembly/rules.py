@@ -138,6 +138,34 @@ def load_assembly_rule(name: str) -> Optional[Dict]:
     }
 
 
+def all_legend_keywords() -> Dict[str, List[str]]:
+    """Map assembly name → its YAML-declared legend keywords.
+
+    Reads the optional ``legend_keywords`` list straight from each rule file
+    (``load_assembly_rule`` returns a fixed shape and drops unknown keys).
+    Files that fail the shared validation gate are skipped, exactly like at
+    runtime. Used by the legend whitelist gate (app.parsing.gating) so the
+    sheet's own legend decides which symbol types are legal — never a
+    hardcoded vocabulary.
+    """
+    index: Dict[str, List[str]] = {}
+    for yaml_path in sorted(_ASSEMBLIES_DIR.glob("*.yaml")):
+        try:
+            with open(yaml_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except yaml.YAMLError as exc:
+            logger.warning("excluding unreadable assembly rule %s: %s", yaml_path.name, exc)
+            continue
+        if not isinstance(data, dict) or _validate_rule_data(data, yaml_path.name):
+            continue
+        keywords = data.get("legend_keywords") or []
+        if isinstance(keywords, list):
+            names = [str(k).strip().upper() for k in keywords if str(k).strip()]
+            if names:
+                index[str(data.get("name", yaml_path.stem))] = names
+    return index
+
+
 # ---------------------------------------------------------------------------
 # Rule engine: apply assembly to a component type
 # ---------------------------------------------------------------------------

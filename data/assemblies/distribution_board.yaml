@@ -1,5 +1,9 @@
 name: distribution_board
 rule_version: "1.0.0"
+legend_keywords:
+  - DISTRIBUTION BOARD
+  - DB
+  - PANEL BOARD
 bom:
   panel_board: 1.0
   disconnect_switch: 1.0

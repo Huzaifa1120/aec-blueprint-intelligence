@@ -689,9 +689,14 @@ def persist_extraction(
             source=_source_region(row.page, row.bbox),
         )
 
+    # Legend-gated REVIEW components (app.parsing.gating) are persisted for
+    # the review trail but NEVER priced — and must not inflate the priced
+    # count of their assembly type, so they stay out of `counts` entirely.
     counts: dict[str | None, int] = {}
     order: list[str | None] = []
     for row in extraction.components:
+        if row.confidence_status == "REVIEW":
+            continue
         key = row.component_type
         if key not in counts:
             counts[key] = 0
@@ -699,6 +704,8 @@ def persist_extraction(
         counts[key] += 1
     consumed: dict[str | None, int] = {key: 0 for key in order}
     for row, component_row in zip(extraction.components, component_rows):
+        if row.confidence_status == "REVIEW":
+            continue
         key = row.component_type
         if consumed[key] == 0:
             _persist_component_boq(

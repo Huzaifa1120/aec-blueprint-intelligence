@@ -8,7 +8,9 @@ Exposes ``POST /api/e2e/run`` which runs the full vector pipeline:
 4. ``measure_routes`` → CONDUIT / CABLE_TRAY lengths at detected scale
 5. ``count_components`` → discrete symbols (lighting, switches, trays, …);
    clusters on OCG layers that map to no assembly rule are surfaced as
-   UNMAPPED entries (never priced) per spec v3 §7.9
+   UNMAPPED entries (never priced) per spec v3 §7.9, and legend/title-block
+   gating flags annotation glyphs + legend-undeclared types as REVIEW
+   (never priced, never silently dropped)
 6. ``apply_assembly`` → per‑component BOM & labor hours from YAML rules
 7. ``compute_boq_item`` → catalog price lookup, ``unpriced`` flag, total cost
 
@@ -66,6 +68,12 @@ from app.parsing.routes import measure_routes
 from app.parsing.schedules import detect_blocks
 from app.parsing.sizes import detect_schedule_rows, resolve_route_size
 from app.parsing.components import count_components
+from app.parsing.gating import (
+    aggregate_flagged,
+    detect_title_block_regions,
+    gate_components,
+    legend_allowed_assemblies,
+)
 from app.parsing.layer_map import layer_to_assembly, route_layers
 from app.parsing.text_walker import associate_text, probe_span_ocgs
 from app.assembly.formulas import FormulaValidationError
@@ -214,18 +222,22 @@ def _build_sheet_extraction(
     raw_text_spans: List[Dict],
     pdf_path: str,
     data_quality: Dict[str, int] | None = None,
+    schedule_blocks: List[Any] | None = None,
 ) -> SheetExtraction:
     """Build the full SheetExtraction bundle for one sheet.
 
     Pure projection: classified layers from the OCG registry (spec v3 §7.3),
-    legend/schedule blocks from cascade spans (§7.6), text annotations joined
-    to component centroids / route polylines (§7.5), and every counted
-    symbol — mapped assemblies AND ``component_type=None`` UNMAPPED entries.
+    legend/schedule blocks from cascade spans (§7.6 — detected once by the
+    caller and passed in so gating and persistence see the same blocks),
+    text annotations joined to component centroids / route polylines (§7.5),
+    and every counted symbol — mapped assemblies AND ``component_type=None``
+    UNMAPPED entries AND legend-gated REVIEW entries (flagged, never priced).
     Persistence re-derives the BOQ from the same deterministic YAML rules;
     nothing here invents a quantity.
     """
     layers = classify_layers(ocg_registry or {})
-    schedule_blocks = detect_blocks(cascade_spans)
+    if schedule_blocks is None:
+        schedule_blocks = detect_blocks(cascade_spans)
     component_centroids = [
         (float(comp.get("x", 0.0)), float(comp.get("y", 0.0))) for comp in components
     ]
@@ -272,7 +284,9 @@ def _build_sheet_extraction(
                 x=float(comp.get("x", 0.0)),
                 y=float(comp.get("y", 0.0)),
                 confidence_status=(
-                    "UNMAPPED" if comp.get("assembly_type") is None else "MEASURED"
+                    "REVIEW"
+                    if comp.get("gate_reason")
+                    else ("UNMAPPED" if comp.get("assembly_type") is None else "MEASURED")
                 ),
                 confidence_score=float(comp.get("confidence_score", 1.0)),
                 source_path_ids=list(comp.get("source_path_ids", [])),
@@ -362,6 +376,34 @@ def _aggregate_unmapped(components: List[Dict]) -> List[Dict]:
             order.append(layer)
         aggregated[layer]["count"] += 1
     return [aggregated[layer] for layer in order]
+
+
+def _route_layer_clusters(raw_drawings: List[Dict], scale: Any) -> List[Dict]:
+    """Cluster ROUTE-layer paths WITHOUT the symbol-diagonal cutoff.
+
+    Geometry-type branching (spec v3 §7.4) excludes paths larger than the
+    symbol cutoff from symbol clustering — but those long runs are exactly
+    what route tracing must measure, and ``measure_routes`` consumes
+    clusters. This helper re-clusters each route layer with
+    ``max_symbol_diagonal_px=None`` so ribbon/closed-loop route geometry is
+    reachable; symbol clustering and its certified count baselines are
+    untouched.
+    """
+    threshold_px = derive_threshold_px(None, _scale_denominator(str(scale or "")))
+    clusters: List[Dict] = []
+    for layer_name in route_layers():
+        clusters.extend(
+            cluster_paths_threshold(
+                raw_drawings,
+                layer_name,
+                threshold_px=threshold_px,
+                max_symbol_diagonal_px=None,
+                # Long strips have centroids far from their touching ends;
+                # centroid buckets would never compare them.
+                bucket_by_enlarged_bbox=True,
+            )
+        )
+    return clusters
 
 
 def resolve_route_context(
@@ -535,7 +577,11 @@ def e2e_run(
         route_layer_names = tuple(route_layers())
         route_stats: Dict[str, int] = {}
         routes = measure_routes(
-            clusters, raw_drawings, scale, route_layer_names, stats=route_stats
+            _route_layer_clusters(raw_drawings, scale),
+            raw_drawings,
+            scale,
+            route_layer_names,
+            stats=route_stats,
         )
         dq.degenerate_skipped += route_stats.get("degenerate_skipped", 0)
         # Resolved cross-section sizes aligned with `routes` by index —
@@ -554,9 +600,24 @@ def e2e_run(
         components = [c for c in all_components if c["assembly_type"] is not None]
         unmapped_components = [c for c in all_components if c["assembly_type"] is None]
         dq.unmapped_count += len(unmapped_components)
-        # Extraction order: mapped first, then UNMAPPED appended — text
-        # annotation component_index values refer into this combined list.
-        extraction_components = components + unmapped_components
+
+        # 4½ Legend/title-block gating: annotation glyphs (legend cells,
+        # title-block linework) and types absent from a readable sheet legend
+        # are flagged for human review — surfaced in the response, persisted
+        # as REVIEW components, NEVER priced or silently dropped.
+        schedule_blocks = detect_blocks(cascade_spans)
+        regions = detect_title_block_regions(cascade_spans)
+        allowed = legend_allowed_assemblies(schedule_blocks)
+        components, flagged_symbols = gate_components(components, regions, allowed)
+        for gate_reason in (f.get("gate_reason") for f in flagged_symbols):
+            if gate_reason == "title_block_region":
+                dq.title_block_excluded += 1
+            elif gate_reason == "not_in_legend":
+                dq.legend_gate_excluded += 1
+        # Extraction order: mapped, then legend-gated REVIEW, then UNMAPPED
+        # appended — text annotation component_index values refer into this
+        # combined list.
+        extraction_components = components + flagged_symbols + unmapped_components
 
         # 5️⃣ Apply assembly rules & compute BOQ
         boq_items: List[Dict[str, Any]] = []
@@ -761,6 +822,7 @@ def e2e_run(
             raw_text_spans=parsed.get("raw_text_spans", []),
             pdf_path=tmp_path,
             data_quality=dq.as_dict(),
+            schedule_blocks=schedule_blocks,
         )
 
         # Optional persistence (default-off): write the full extraction
@@ -786,6 +848,7 @@ def e2e_run(
             "schedule_blocks_count": len(extraction.schedule_blocks),
             "text_annotations_count": len(extraction.text_annotations),
             "unmapped_items": _aggregate_unmapped(unmapped_components),
+            "flagged_symbols": aggregate_flagged(flagged_symbols),
             "data_quality": dq.as_dict(),
         }
         if persist and estimate_id is not None:

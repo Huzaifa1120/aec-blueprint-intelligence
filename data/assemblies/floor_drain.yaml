@@ -1,5 +1,7 @@
 name: floor_drain
 rule_version: "1.0.0"
+legend_keywords:
+  - FLOOR DRAIN
 bom:
   floor_drain: 1
   p_trap: 1
