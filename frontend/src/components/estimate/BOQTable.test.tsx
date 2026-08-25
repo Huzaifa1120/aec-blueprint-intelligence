@@ -179,6 +179,15 @@ describe("BOQTable", () => {
     expect(accepted).toBe(false)
     expect(scrollToIndexMock).not.toHaveBeenCalled()
   })
+
+  it("applies gridTemplateColumns to data rows so cells stay in columns", () => {
+    renderTable()
+    const rows = screen.getAllByTestId("boq-row")
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows[0]).toHaveStyle({
+      gridTemplateColumns: "32px minmax(0,1fr) 96px 48px 96px 104px 88px",
+    })
+  })
 })
 
 function renderTableWithRef(ref: RefObject<BOQTableHandle | null>) {

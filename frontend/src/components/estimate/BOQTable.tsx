@@ -417,7 +417,7 @@ export const BOQTable = forwardRef<BOQTableHandle, BOQTableProps>(function BOQTa
                     selectedKey === entry.item.key ? "bg-accent-wash" : "hover:bg-muted/60",
                     entry.item.key === pulseKey && "assumed-pulse",
                   )}
-                  style={style}
+                  style={{ ...style, gridTemplateColumns: GRID_TEMPLATE }}
                 >
                   {cells.map((cell) =>
                     cell.column.id === reviewColumnId ? (
