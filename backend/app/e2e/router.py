@@ -18,8 +18,8 @@ every run; when ``persist=true`` it is written through the persistence spine
 and the response carries an ``estimate_id`` replayable via
 ``GET /api/estimates/{id}/replay``.
 
-Returns BOQ items with ``confidence_status`` (MEASURED/DERIVED/ASSUMED) and
-``source_path_ids`` for frontend click‑through.
+Returns BOQ items with ``confidence_status`` (DERIVED/ASSUMED at BOQ level —
+rows stay MEASURED) and ``source_path_ids`` for frontend click‑through.
 
 Trap compliance:
 - No price is hardcoded in source. If the catalog has no price, the item is
@@ -55,6 +55,7 @@ from app.ingestion.router import classify_upload
 from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, _scale_denominator, parse_pdf
 from app.parsing.scale import resolve_scale
 from app.parsing.clustering import cluster_paths_threshold, derive_threshold_px
+from app.parsing.confidence_tiering import confidence_score
 from app.parsing.layer_registry import classify_layers, discipline_of
 from app.parsing.routes import measure_routes
 from app.parsing.schedules import detect_blocks
@@ -82,21 +83,34 @@ def _boq_line(
     assembly_type: str,
     material_name: str,
     quantity: float,
-    confidence_status: str,
+    measurement_status: str,
     source_path_ids: List[str],
     db: OrmSession,
+    *,
     source_quality: str = "layered_vector",
     derivation: Any = None,
-    size_source: str = None,
+    size_source: Optional[str] = None,
+    rule_version: Optional[str] = None,
+    scale_assumed: bool = False,
 ) -> Dict[str, Any]:
-    from app.core.config import get_settings
+    """Build one BOQ line with its live confidence tier (spec v3 §7.12).
 
+    BOQ lines are never MEASURED — the row-level ``measurement_status``
+    stays on the Measurement/RouteRow/ComponentRow; the priced line is
+    DERIVED by default (calculated via assembly rule from measured input)
+    and downgraded to ASSUMED when the size cascade assumed it or the
+    sheet scale was assumed.
+    """
     boq = compute_boq_item(quantity, material_name, db)
-    base_score = (
-        get_settings().degraded_confidence_multiplier
-        if source_quality == "degraded_vector"
-        else 1.0
-    )
+
+    if size_source == "assumed" or scale_assumed:
+        tier = "ASSUMED"
+        score = 0.3
+    else:
+        tier = "DERIVED"
+        score = confidence_score("DERIVED", {"rule_version": rule_version or "1.0.0"})
+    if source_quality == "degraded_vector":
+        score = round(score * get_settings().degraded_confidence_multiplier, 4)
     return {
         "assembly_type": assembly_type,
         "material_name": material_name,
@@ -104,8 +118,8 @@ def _boq_line(
         "unit_price": boq.get("unit_price"),
         "total_cost": boq.get("total_cost"),
         "unpriced": boq.get("unpriced", False),
-        "confidence_status": confidence_status,
-        "confidence_score": base_score,
+        "confidence_status": tier,
+        "confidence_score": score,
         "source_quality": source_quality,
         "source_path_ids": source_path_ids,
         "derivation": derivation,
@@ -435,6 +449,9 @@ def e2e_run(
         parsed = parse_pdf(tmp_path)
         scale_res = resolve_scale(parsed.get("raw_text_spans", []))
         scale = scale_res.scale_str
+        # Assumed-scale honesty: when no parseable scale token exists, every
+        # length-driven BOQ line downgrades to ASSUMED (spec v3 §7.4/§7.12).
+        scale_status = scale_res.status
         clusters = parsed.get("clusters", [])
         raw_drawings = parsed.get("raw_drawings", [])
         cascade_spans = _adapt_spans_for_cascade(parsed.get("raw_text_spans", []))
@@ -530,6 +547,8 @@ def e2e_run(
                             source_quality=source_quality,
                             derivation=mat.get("derivation"),
                             size_source=size_source,
+                            rule_version=applied.get("rule_version"),
+                            scale_assumed=(scale_status == "assumed"),
                         )
                     )
 
@@ -574,6 +593,7 @@ def e2e_run(
                             source_quality=source_quality,
                             derivation=mat.get("derivation"),
                             size_source=None,
+                            rule_version=rule.get("rule_version"),
                         )
                     )
 
