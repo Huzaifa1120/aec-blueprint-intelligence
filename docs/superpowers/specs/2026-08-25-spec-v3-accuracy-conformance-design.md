@@ -82,6 +82,7 @@ Edit `docs/AEC-Blueprint-System-Design-Spec-v3.md` directly:
 
 - `boq_items.source_bbox_json` TEXT NULL — `{page, x0, y0, x1, y1}` in PDF points.
 - `review_corrections` table — `id PK`, `estimate_id FK`, `boq_item_id FK`, `action`, `confidence_tier`, `reason TEXT NULL`, `corrected_value FLOAT NULL`, `created_at`.
+- Implementation note (landed T7, 2026-08-25): corrections live as nullable columns on the existing `review_actions` table instead of a separate `review_corrections` table (avoids duplicating action/session/timestamp; same §15 semantics).
 - No new labor columns (`total_labor_cost` exists).
 
 ### 4.2 Stable row identities

@@ -285,6 +285,7 @@ Pure, unit-tested arithmetic. Zero AI involvement.
 ### 7.13 Human review UI — instrumented in v3
 Overlay every extraction on the original drawing; click-through to source; bulk-accept high-confidence `MEASURED` items; filter/group by discipline, layer-classification confidence, and now also by `source_quality`.
 **New:** instrument and log average review time per sheet and per confidence tier, from Stage 0 onward. This isn't cosmetic — it's the direct measure of whether the system is actually saving time over manual takeoff, which is the entire commercial case for building it. See §15.
+**Implementation note (2026-08-25):** correction annotations persist as nullable columns (`boq_item_id`, `reason`, `corrected_value`) on the existing `review_actions` table rather than a separate `review_corrections` table — annotation-only semantics unchanged (§15).
 
 ### 7.14 Output generation
 BOQ, BOM, LLM-narrated scope of work (from structured data, never raw images), workforce/labor estimate. Export: JSON, XLSX, PDF.
