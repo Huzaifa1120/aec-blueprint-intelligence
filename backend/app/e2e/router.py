@@ -61,7 +61,7 @@ from app.e2e.persistence import (
 )
 from app.ingestion.router import classify_upload
 from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, parse_pdf
-from app.parsing.scale import resolve_scale
+from app.parsing.scale import resolve_scale, parse_scale_denominator
 from app.parsing.clustering import cluster_paths_threshold, derive_threshold_px
 from app.parsing.layer_registry import classify_layers, discipline_of
 from app.parsing.routes import measure_routes
@@ -373,7 +373,7 @@ def _route_layer_clusters(raw_drawings: List[Dict], scale: Any) -> List[Dict]:
     reachable; symbol clustering and its certified count baselines are
     untouched.
     """
-    threshold_px = derive_threshold_px(None, _scale_denominator(str(scale or "")))  # noqa: F821 — deferred: legacy _scale_denominator → pass scale_res.denominator next router touch
+    threshold_px = derive_threshold_px(None, parse_scale_denominator(str(scale or ""))[0])
     clusters: List[Dict] = []
     for layer_name in route_layers():
         clusters.extend(
