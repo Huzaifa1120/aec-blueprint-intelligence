@@ -295,13 +295,29 @@ class TestSourceQualityPersistence:
         assert rows
         assert {r["source_quality"] for r in rows} == verdicts
 
+    def test_json_export_equals_boq_payload(self, client, plumbing_run):
+        """The JSON export round-trips /boq byte-for-value — source_quality
+        included on every row."""
+        estimate_id = plumbing_run["estimate_id"]
+        boq = client.get(f"/api/estimates/{estimate_id}/boq").json()
+        rows = boq["routes"] + boq["materials"]
+        assert rows, "parity against an empty BOQ would be vacuous"
+        export = client.get(f"/api/exports/estimates/{estimate_id}/export?format=json")
+        assert export.status_code == 200, export.text
+        assert export.json() == boq
+
     def test_legacy_estimate_rows_read_column_default(self, client, plumbing_run):
         """A pre-feature Estimate row (inserted without source_quality) serves
-        'layered_vector' from the migration's server default."""
+        'layered_vector' from the migration's server default.
+
+        BOQ items are COPIED onto the legacy estimate, never moved — this test
+        must not mutate the module-scoped fixture state later tests read.
+        """
         from sqlalchemy import insert
 
         with OrmSession(get_engine()) as db:
             original = db.get(Estimate, uuid.UUID(plumbing_run["estimate_id"]))
+            items = db.query(BoqItem).filter_by(estimate_id=original.id).all()
             legacy = db.execute(
                 insert(Estimate).values(
                     project_id=original.project_id,
@@ -311,21 +327,24 @@ class TestSourceQualityPersistence:
                 )
             )
             legacy_id = legacy.inserted_primary_key[0]
-            db.query(BoqItem).filter_by(estimate_id=original.id).update(
-                {"estimate_id": legacy_id}
-            )
+            for item in items:
+                db.add(
+                    BoqItem(
+                        measurement_id=item.measurement_id,
+                        estimate_id=legacy_id,
+                        quantity=item.quantity,
+                        unit_cost=item.unit_cost,
+                        total_cost=item.total_cost,
+                        derivation_json=item.derivation_json,
+                        size_source=item.size_source,
+                        source_bbox_json=item.source_bbox_json,
+                        confidence_status=item.confidence_status,
+                        confidence_score=item.confidence_score,
+                    )
+                )
             db.commit()
 
         boq = client.get(f"/api/estimates/{str(legacy_id)}/boq").json()
         rows = boq["routes"] + boq["materials"]
-        assert rows, "repointed BOQ items must serve under the legacy estimate"
+        assert rows, "copied BOQ items must serve under the legacy estimate"
         assert {r["source_quality"] for r in rows} == {"layered_vector"}
-
-    def test_json_export_equals_boq_payload(self, client, plumbing_run):
-        """The JSON export round-trips /boq byte-for-value — source_quality
-        included on every row."""
-        estimate_id = plumbing_run["estimate_id"]
-        boq = client.get(f"/api/estimates/{estimate_id}/boq").json()
-        export = client.get(f"/api/exports/estimates/{estimate_id}/export?format=json")
-        assert export.status_code == 200, export.text
-        assert export.json() == boq
