@@ -58,7 +58,7 @@ from app.e2e.persistence import (
     persist_extraction,
 )
 from app.ingestion.router import classify_upload
-from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, _scale_denominator, parse_pdf
+from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, parse_pdf
 from app.parsing.scale import resolve_scale
 from app.parsing.clustering import cluster_paths_threshold, derive_threshold_px
 from app.parsing.layer_registry import classify_layers, discipline_of
@@ -306,15 +306,15 @@ def _span_ocg_map(pdf_path: str, raw_text_spans: List[Dict]) -> dict[int, str]:
 def _unmapped_layer_clusters(
     ocg_registry: Dict[str, Dict],
     raw_drawings: List[Dict],
-    scale: Any,
+    denominator: float,
 ) -> List[Dict]:
     """Cluster symbol-scale paths on OCG layers that map to no assembly rule.
 
-    Uses the same fallback threshold parse_pdf clusters mapped layers with
-    (no legend-derived mm threshold exists yet), so unmapped clustering stays
-    consistent with the mapped pipeline (spec v3 §7.4/§7.9).
+    Clusters at the same resolved-scale threshold parse_pdf clusters mapped
+    layers with (no legend-derived mm threshold exists yet), so unmapped
+    clustering stays consistent with the mapped pipeline (spec v3 §7.4/§7.9).
     """
-    threshold_px = derive_threshold_px(None, _scale_denominator(str(scale or "")))
+    threshold_px = derive_threshold_px(None, denominator)
     max_symbol_diagonal_px = threshold_px * SYMBOL_CUTOFF_FACTOR
     clusters: List[Dict] = []
     for layer_name in ocg_registry or {}:
@@ -530,7 +530,7 @@ def e2e_run(
         # OCG layers that map to no rule are surfaced as UNMAPPED entries —
         # reported and persisted, never priced (spec v3 §7.9).
         unmapped_clusters = _unmapped_layer_clusters(
-            parsed.get("ocg_registry") or {}, raw_drawings, scale
+            parsed.get("ocg_registry") or {}, raw_drawings, scale_res.denominator
         )
         all_components = count_components(
             clusters + unmapped_clusters, raw_drawings, include_unmapped=True
