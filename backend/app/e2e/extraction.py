@@ -69,6 +69,8 @@ class ComponentRow:
     confidence_status: str = "MEASURED"
     confidence_score: float = 1.0
     source_path_ids: list[str] = field(default_factory=list)
+    page: int = 0  # 0-indexed source page for click-through
+    bbox: tuple[float, float, float, float] | list[float] | None = None
 
 
 @dataclass
@@ -79,6 +81,8 @@ class RouteRow:
     confidence_status: str = "MEASURED"
     confidence_score: float = 1.0
     size_json: dict | None = None  # cascade provenance {width_mm..,source,ref}
+    page: int = 0  # 0-indexed source page for click-through
+    bbox: tuple[float, float, float, float] | list[float] | None = None
 
 
 @dataclass
@@ -99,3 +103,6 @@ class SheetExtraction:
     # pipeline fell back to 1:100 and flags the run for review.
     scale_status: str | None = None
     scale_str: str | None = None
+    # Per-run DataQuality counters (spec v3 conformance) folded into the
+    # persisted estimate's data_quality_json alongside the resolved scale_str.
+    data_quality: dict[str, int] | None = None

@@ -24,20 +24,65 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from typing import Any
 
 from sqlalchemy.orm import Session as OrmSession
 
 from app.assembly.formulas import FormulaValidationError
 from app.assembly.rules import apply_assembly, load_assembly_rule
 from app.catalog.prices import compute_boq_item
+from app.core.config import get_settings
 from app.db.models.estimate import BoqItem, Estimate, Measurement
 from app.db.models.extraction import Layer, ScheduleBlock, TextAnnotation
 from app.db.models.geometry import Component, Route
 from app.db.models.project import Drawing, Project, Sheet
 from app.e2e.extraction import ROUTE_ASSEMBLIES, SIZED_ASSEMBLIES, SheetExtraction
+from app.parsing.confidence_tiering import confidence_score
 from app.parsing.layer_map import layer_to_assembly
 
 logger = logging.getLogger(__name__)
+
+
+def live_confidence_tier(
+    *,
+    size_source: str | None,
+    scale_assumed: bool,
+    source_quality: str,
+    rule_version: str | None,
+) -> tuple[str, float]:
+    """The single live-tier rule for priced BOQ lines (T3-review ruling).
+
+    Shared by the e2e response builder (``app.e2e.router._boq_line``) and this
+    persistence spine so a replayed estimate reads exactly the tiers a fresh
+    run carried — never the row-level MEASURED status. ASSUMED wins over
+    DERIVED; degraded input quality multiplies the score.
+    """
+    if size_source == "assumed" or scale_assumed:
+        tier = "ASSUMED"
+        score = 0.3
+    else:
+        tier = "DERIVED"
+        score = confidence_score("DERIVED", {"rule_version": rule_version or "1.0.0"})
+    if source_quality == "degraded_vector":
+        score = round(score * get_settings().degraded_confidence_multiplier, 4)
+    return tier, score
+
+
+def _source_region(page: int | None, bbox: Any) -> dict | None:
+    """Normalized click-through region ``{"page", "bbox"}``; None when absent.
+
+    Same shape the live response carries in each BOQ row's ``source`` block,
+    so payload round-trips are value-identical.
+    """
+    if not bbox:
+        return None
+    try:
+        corners = [float(v) for v in bbox]
+    except (TypeError, ValueError):
+        return None
+    if len(corners) < 4:
+        return None
+    return {"page": int(page or 0), "bbox": corners}
 
 
 def _resolve_project(db: OrmSession, project_id: uuid.UUID | None) -> Project:
@@ -158,6 +203,9 @@ def _persist_route_boq(
     rule_version: str,
     size_source: str | None,
     layer_ocg: str,
+    *,
+    scale_status: str | None = None,
+    source: dict | None = None,
 ) -> None:
     """Derive and persist the material lines for one measured route."""
     assembly = layer_to_assembly(layer_ocg) or route_row.route_type
@@ -180,6 +228,15 @@ def _persist_route_boq(
             exc,
         )
         return
+
+    # Live tier exactly as the response carried it (T3 ruling) — same inputs,
+    # same rule as app.e2e.router._boq_line via the shared helper.
+    tier, score = live_confidence_tier(
+        size_source=size_source,
+        scale_assumed=(scale_status == "assumed"),
+        source_quality=source_quality,
+        rule_version=applied.get("rule_version"),
+    )
 
     rule_dict = load_assembly_rule(assembly) or {}
     rule_bom = rule_dict.get("bom")
@@ -231,6 +288,9 @@ def _persist_route_boq(
             payload,
             source_quality,
             size_source,
+            source=source,
+            confidence_status=tier,
+            confidence_score=score,
         )
 
 
@@ -242,6 +302,9 @@ def _persist_component_boq(
     confidence_status: str,
     source_quality: str,
     rule_version: str,
+    *,
+    scale_status: str | None = None,
+    source: dict | None = None,
 ) -> None:
     """Derive and persist the material lines for one counted symbol type."""
     resolved_type = component_row.component_type
@@ -265,6 +328,15 @@ def _persist_component_boq(
     materials = applied.get("materials", [])
     if not materials:
         return
+
+    # Live tier exactly as the response carried it (T3 ruling): count-based
+    # lines downgrade under an assumed sheet scale like every other line.
+    tier, score = live_confidence_tier(
+        size_source=None,
+        scale_assumed=(scale_status == "assumed"),
+        source_quality=source_quality,
+        rule_version=applied.get("rule_version"),
+    )
 
     measurement = Measurement(
         component_id=component_row.id,
@@ -298,6 +370,9 @@ def _persist_component_boq(
             payload,
             source_quality,
             None,
+            source=source,
+            confidence_status=tier,
+            confidence_score=score,
         )
 
 
@@ -310,6 +385,10 @@ def _add_boq_item(
     payload: dict,
     source_quality: str,
     size_source: str | None,
+    *,
+    source: dict | None = None,
+    confidence_status: str | None = None,
+    confidence_score: float | None = None,
 ) -> None:
     boq = compute_boq_item(quantity, material_name, db)
     if boq.get("unpriced"):
@@ -322,6 +401,12 @@ def _add_boq_item(
         total_cost=float(boq.get("total_cost") or 0.0),
         derivation_json=json.dumps(payload),
         size_source=size_source,
+        # Click-through region + live tier, mirroring the API response
+        # (T3-review ruling): a replayed estimate reads the same tiers a
+        # fresh run showed, never the row-level MEASURED status.
+        source_bbox_json=(json.dumps(source) if source else None),
+        confidence_status=confidence_status,
+        confidence_score=confidence_score,
     )
     db.add(item)
 
@@ -427,7 +512,16 @@ def persist_extraction(
 
     db.flush()  # assign route/component ids before measurements reference them
 
-    estimate = Estimate(project_id=project.id)
+    # Estimate-level provenance (spec v3 conformance): how the scale was
+    # obtained + the run's DataQuality counters with the resolved scale_str
+    # folded into the same JSON document.
+    estimate = Estimate(
+        project_id=project.id,
+        scale_status=extraction.scale_status,
+        data_quality_json=json.dumps(
+            {"scale_str": extraction.scale_str, **(extraction.data_quality or {})}
+        ),
+    )
     db.add(estimate)
     db.flush()
 
@@ -443,6 +537,8 @@ def persist_extraction(
             extraction.rule_version,
             (row.size_json or {}).get("source"),
             row.layer_ocg,
+            scale_status=extraction.scale_status,
+            source=_source_region(row.page, row.bbox),
         )
 
     counts: dict[str | None, int] = {}
@@ -465,6 +561,8 @@ def persist_extraction(
                 row.confidence_status,
                 extraction.source_quality,
                 extraction.rule_version,
+                scale_status=extraction.scale_status,
+                source=_source_region(row.page, row.bbox),
             )
         consumed[key] += 1
 

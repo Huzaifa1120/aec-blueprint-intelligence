@@ -59,10 +59,19 @@ def count_components(
             "source_path_ids": [str, ...],
             "confidence_status": "MEASURED" | "UNMAPPED",
             "confidence_score": 1.0,
+            "bbox": [x0, y0, x1, y1],   # cluster region for click-through
+            "page": int,                # 0-indexed source page
         }
     """
     path_lookup: Dict[str, Dict] = {p["id"]: p for p in raw_drawings}
     components: List[Dict] = []
+
+    def _source_fields(cluster: Dict, first: Dict) -> Dict:
+        bbox = cluster.get("bbox") or first.get("bbox")
+        return {
+            "bbox": [float(v) for v in bbox] if bbox else None,
+            "page": int(first.get("page_number") or 1) - 1,
+        }
 
     for cluster in clusters:
         member_ids = cluster.get("member_path_ids", [])
@@ -85,6 +94,7 @@ def count_components(
                         "source_path_ids": member_ids,
                         "confidence_status": "UNMAPPED",
                         "confidence_score": 1.0,
+                        **_source_fields(cluster, first),
                     }
                 )
             continue
@@ -100,6 +110,7 @@ def count_components(
                 "source_path_ids": member_ids,
                 "confidence_status": "MEASURED",
                 "confidence_score": 1.0,
+                **_source_fields(cluster, first),
             }
         )
 

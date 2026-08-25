@@ -51,12 +51,11 @@ from app.e2e.extraction import (
     SheetExtraction,
 )
 from app.e2e.data_quality import DataQuality
-from app.e2e.persistence import persist_extraction
+from app.e2e.persistence import live_confidence_tier, persist_extraction
 from app.ingestion.router import classify_upload
 from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, _scale_denominator, parse_pdf
 from app.parsing.scale import resolve_scale
 from app.parsing.clustering import cluster_paths_threshold, derive_threshold_px
-from app.parsing.confidence_tiering import confidence_score
 from app.parsing.layer_registry import classify_layers, discipline_of
 from app.parsing.routes import measure_routes
 from app.parsing.schedules import detect_blocks
@@ -80,6 +79,23 @@ router = APIRouter(prefix="/api/e2e", tags=["e2e"])
 # ---------------------------------------------------------------------------
 # Helper: compute BOQ line from a material + quantity
 # ---------------------------------------------------------------------------
+def _source_block(page: Any, bbox: Any) -> Optional[Dict[str, Any]]:
+    """Normalized click-through region for one BOQ row (spec v3 §7.12).
+
+    ``{"page": int, "bbox": [x0, y0, x1, y1]}`` in PDF points, or None when
+    no usable region exists — persistence stores exactly this shape.
+    """
+    if not bbox:
+        return None
+    try:
+        corners = [float(v) for v in bbox]
+    except (TypeError, ValueError):
+        return None
+    if len(corners) < 4:
+        return None
+    return {"page": int(page or 0), "bbox": corners}
+
+
 def _boq_line(
     assembly_type: str,
     material_name: str,
@@ -93,25 +109,26 @@ def _boq_line(
     size_source: Optional[str] = None,
     rule_version: Optional[str] = None,
     scale_assumed: bool = False,
+    source: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build one BOQ line with its live confidence tier (spec v3 §7.12).
 
     BOQ lines are never MEASURED — the row-level ``measurement_status``
     stays on the Measurement/RouteRow/ComponentRow; the priced line is
     DERIVED by default (calculated via assembly rule from measured input)
-    and downgraded to ASSUMED when the size cascade assumed it or the
-    sheet scale was assumed.
+    and downgraded to ASSUMED when the size cascade assumed it or the sheet
+    scale was assumed.
     """
     boq = compute_boq_item(quantity, material_name, db)
 
-    if size_source == "assumed" or scale_assumed:
-        tier = "ASSUMED"
-        score = 0.3
-    else:
-        tier = "DERIVED"
-        score = confidence_score("DERIVED", {"rule_version": rule_version or "1.0.0"})
-    if source_quality == "degraded_vector":
-        score = round(score * get_settings().degraded_confidence_multiplier, 4)
+    # Shared with the persistence spine so a replayed estimate reads exactly
+    # these tiers (T3-review ruling).
+    tier, score = live_confidence_tier(
+        size_source=size_source,
+        scale_assumed=scale_assumed,
+        source_quality=source_quality,
+        rule_version=rule_version,
+    )
     return {
         "assembly_type": assembly_type,
         "material_name": material_name,
@@ -123,6 +140,7 @@ def _boq_line(
         "confidence_score": score,
         "source_quality": source_quality,
         "source_path_ids": source_path_ids,
+        "source": source,
         "derivation": derivation,
         "size_source": size_source,
     }
@@ -158,6 +176,7 @@ def _build_sheet_extraction(
     cascade_spans: List[Dict],
     raw_text_spans: List[Dict],
     pdf_path: str,
+    data_quality: Dict[str, int] | None = None,
 ) -> SheetExtraction:
     """Build the full SheetExtraction bundle for one sheet.
 
@@ -192,6 +211,7 @@ def _build_sheet_extraction(
         scale_str=scale_str,
         discipline=None,
         source_quality=source_quality,
+        data_quality=data_quality,
         layers=layers,
         routes=[
             RouteRow(
@@ -201,6 +221,10 @@ def _build_sheet_extraction(
                 confidence_status=route.get("confidence_status", "MEASURED"),
                 confidence_score=float(route.get("confidence_score", 1.0)),
                 size_json=route_sizes[index],
+                page=int(route.get("page") or 0),
+                bbox=(
+                    _source_block(route.get("page"), route.get("bbox")) or {}
+                ).get("bbox"),
             )
             for index, route in enumerate(routes)
         ],
@@ -215,6 +239,10 @@ def _build_sheet_extraction(
                 ),
                 confidence_score=float(comp.get("confidence_score", 1.0)),
                 source_path_ids=list(comp.get("source_path_ids", [])),
+                page=int(comp.get("page") or 0),
+                bbox=(
+                    _source_block(comp.get("page"), comp.get("bbox")) or {}
+                ).get("bbox"),
             )
             for comp in components
         ],
@@ -568,6 +596,9 @@ def e2e_run(
                             size_source=size_source,
                             rule_version=applied.get("rule_version"),
                             scale_assumed=(scale_status == "assumed"),
+                            source=_source_block(
+                                route.get("page"), route.get("bbox")
+                            ),
                         )
                     )
 
@@ -616,6 +647,10 @@ def e2e_run(
                             derivation=mat.get("derivation"),
                             size_source=None,
                             rule_version=rule.get("rule_version"),
+                            scale_assumed=(scale_status == "assumed"),
+                            source=_source_block(
+                                comp.get("page"), comp.get("bbox")
+                            ),
                         )
                     )
 
@@ -638,6 +673,7 @@ def e2e_run(
             cascade_spans=cascade_spans,
             raw_text_spans=parsed.get("raw_text_spans", []),
             pdf_path=tmp_path,
+            data_quality=dq.as_dict(),
         )
 
         # Optional persistence (default-off): write the full extraction

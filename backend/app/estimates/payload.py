@@ -49,6 +49,7 @@ def payload_from_estimate(estimate: Estimate) -> dict:
         derivation = parse_json_object(item.derivation_json) or {}
         unpriced = bool(derivation.get("unpriced")) or item.unit_cost == 0.0
         entry: dict = {
+            "item_id": str(item.id),
             "material_name": material_name(derivation, measurement),
             "quantity": item.quantity,
             # Unit of measure from the assembly rule (spec v3 §4.8); None for
@@ -59,7 +60,14 @@ def payload_from_estimate(estimate: Estimate) -> dict:
             "unit_price": None if unpriced else item.unit_cost,
             "total_cost": item.total_cost,
             "unpriced": unpriced,
-            "confidence_status": getattr(measurement, "confidence_status", "MEASURED"),
+            # Live tier persisted at write time (T3 ruling) so a replay reads
+            # what the fresh run showed; legacy rows fall back to the
+            # measurement row status.
+            "confidence_status": item.confidence_status
+            or getattr(measurement, "confidence_status", "MEASURED"),
+            "confidence_score": item.confidence_score,
+            # Click-through region; None on legacy rows (never a crash).
+            "source": parse_json_object(item.source_bbox_json),
             "size_source": item.size_source,
         }
         route = getattr(measurement, "route", None)
@@ -75,6 +83,7 @@ def payload_from_estimate(estimate: Estimate) -> dict:
             )
         else:
             materials.append(entry)
+    data_quality = parse_json_object(estimate.data_quality_json)
     return {
         "estimate_id": str(estimate.id),
         "totals": {
@@ -82,6 +91,13 @@ def payload_from_estimate(estimate: Estimate) -> dict:
             "labor": estimate.total_labor_cost,
             "grand": estimate.total_cost,
         },
+        # Scale honesty (spec v3 §7.4): status from the estimate column, the
+        # resolved string folded into data_quality_json at persist time.
+        "scale": {
+            "value": (data_quality or {}).get("scale_str"),
+            "status": estimate.scale_status,
+        },
+        "data_quality": data_quality,
         "routes": routes,
         "materials": materials,
     }

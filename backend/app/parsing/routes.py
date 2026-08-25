@@ -33,6 +33,8 @@ class RouteGeo(TypedDict):
     confidence_status: str  # "MEASURED"
     confidence_score: float  # 1.0 = measured directly from vector
     source_path_ids: List[str]
+    bbox: Tuple[float, float, float, float]  # (x0, y0, x1, y1) around the polyline
+    page: int  # 0-indexed source page of the first member path
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +304,9 @@ def measure_routes(
         # The chained items-order sequence above IS the drawing order.
         length_m = compute_length_meters(polyline_parts, scale)
 
+        xs = [pt[0] for pt in polyline_parts]
+        ys = [pt[1] for pt in polyline_parts]
+
         route: RouteGeo = {
             "id": str(uuid.uuid4()),
             "type": layer.lower().replace(" ", "_"),
@@ -311,6 +316,10 @@ def measure_routes(
             "confidence_status": "MEASURED",
             "confidence_score": 1.0,
             "source_path_ids": member_ids,
+            # Click-through provenance (spec v3 §7.12): region around the
+            # measured run + the page it was drawn on (0-indexed).
+            "bbox": (min(xs), min(ys), max(xs), max(ys)),
+            "page": int(member_path.get("page_number") or 1) - 1,
         }
 
         measured_routes.append(route)

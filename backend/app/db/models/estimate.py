@@ -48,7 +48,13 @@ class BoqItem(Base):
     size_source: Mapped[str | None] = mapped_column(String(20), default=None)
     # schedule|label|geometry|assumed
     source_bbox_json: Mapped[str | None] = mapped_column(Text, default=None)
-    # JSON text: {page, x0, y0, x1, y1} in PDF points
+    # JSON text: {"page": int, "bbox": [x0, y0, x1, y1]} in PDF points — the
+    # click-through region the live response carried for this row
+    confidence_status: Mapped[str | None] = mapped_column(String(20), default=None)
+    # Live tier at persist time (DERIVED|ASSUMED) — mirrors the API response
+    # (T3-review ruling); NULL on legacy rows, payload falls back to the
+    # measurement row status.
+    confidence_score: Mapped[float | None] = mapped_column(default=None)
 
     measurement: Mapped[Measurement] = relationship(back_populates="boq_items")
     estimate: Mapped["Estimate"] = relationship(back_populates="boq_items")
