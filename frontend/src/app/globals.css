@@ -3,6 +3,8 @@
 @import "shadcn/tailwind.css";
 @import "../styles/tokens.css";
 
+@custom-variant dark (&:is(.dark *));
+
 @theme inline {
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
