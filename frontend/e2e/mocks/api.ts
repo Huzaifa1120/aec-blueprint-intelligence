@@ -97,6 +97,16 @@ const NARRATION: NarrationResponse = {
   narrative: "Scope of work placeholder narrative for e2e.",
 }
 
+// Minimal single-page blank PDF (exact xref offsets) so pdf.js renders the
+// workspace viewer without console errors on mocked mounts.
+const SOURCE_PDF =
+  "%PDF-1.4\n" +
+  "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n" +
+  "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n" +
+  "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\n" +
+  "xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n" +
+  "trailer << /Size 4 /Root 1 0 R >>\nstartxref\n186\n%%EOF\n"
+
 const RUN_RESULT = {
   status: "vector",
   scale: "1:100",
@@ -131,6 +141,9 @@ export async function installApiMocks(page: Page): Promise<void> {
     }
     if (method === "GET" && url.pathname === `/api/estimates/${ESTIMATE_ID}/boq`) {
       return route.fulfill(fulfill(BOQ))
+    }
+    if (method === "GET" && /^\/api\/estimates\/[^/]+\/file$/.test(url.pathname)) {
+      return route.fulfill({ status: 200, contentType: "application/pdf", body: SOURCE_PDF })
     }
     if (method === "GET" && url.pathname === `/api/narration/estimates/${ESTIMATE_ID}`) {
       return route.fulfill(fulfill(NARRATION))
