@@ -28,6 +28,24 @@ def test_generic_ratio_detected():
     assert res.denominator == 50.0
 
 
+def test_imperial_title_block_40ft():
+    res = resolve_scale([_span("SCALE 1=40'-0\"")])
+    assert res.status == "detected"
+    assert res.denominator == 480.0
+
+
+def test_imperial_title_block_100ft():
+    res = resolve_scale([_span('SCALE 1=100\'-0"')])
+    assert res.status == "detected"
+    assert res.denominator == 1200.0
+
+
+def test_electrical_precedence_over_architectural_in_same_span():
+    res = resolve_scale([_span('ELECTRICAL.SCALE 1:50   SCALE 1/4"=1\'-0"')])
+    assert res.status == "detected"
+    assert res.denominator == 50.0
+
+
 def test_missing_scale_is_assumed_1_100():
     res = resolve_scale([_span("no scale here"), _span("")])
     assert res.status == "assumed"

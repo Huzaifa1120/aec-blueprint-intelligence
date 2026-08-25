@@ -17,6 +17,8 @@ class ScaleResult:
     status: str  # "detected" | "assumed"
 
 
+_IMPERIAL_TITLE_BLOCK_RE = re.compile(r"\bSCALE\s+1\s*=\s*(\d+)\s*'\s*-0\"")
+
 # Architectural inch scales -> denominator (feet per inch * 12 * ratio inverse)
 _ARCH_DENOMINATORS = {
     "1/2": 24.0,
@@ -41,11 +43,14 @@ def resolve_scale(text_spans: List[Dict[str, Any]]) -> ScaleResult:
         text = span.get("text", "") or ""
         if not text:
             continue
-        m = re.search(r"\bELECTRICAL\.SCALE\s+(1:\d+)\b", text) or re.search(
-            r"\bSCALE\s+1=(\d+)'\''-0\"\b", text
-        )
+        m = re.search(r"\bELECTRICAL\.SCALE\s+(1:\d+)\b", text)
         if m:
             return _from_ratio(m.group(1))
+        m_imp = _IMPERIAL_TITLE_BLOCK_RE.search(text)
+        if m_imp:
+            n = int(m_imp.group(1))
+            denom = float(n * 12)
+            return ScaleResult(f"1:{n * 12}", denom, "detected")
         arch = re.search(r'\b(\d+/\d+|\d+)"\s*=\s*1\'\s*-?\s*0?"?', text)
         if arch and arch.group(1) in _ARCH_DENOMINATORS:
             denom = _ARCH_DENOMINATORS[arch.group(1)]
@@ -115,7 +120,6 @@ def detect_scale(
 # Electrical-specific scales (always have capturing group 1 = the scale value)
 _ELECTRICAL_SCALES = [
     r"\bELECTRICAL\.SCALE\s+(1:\d+)\b",        # "ELECTRICAL.SCALE 1:100"
-    r"\bSCALE\s+1=(\d+)'\''-0\"\b",             # "SCALE 1=100'-0\"" → "100"
 ]
 
 # Architectural scales (always have capturing group 1 = the scale value)
