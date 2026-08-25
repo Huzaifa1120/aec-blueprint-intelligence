@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid as _uuid
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -21,8 +22,11 @@ class CreateSessionRequest(BaseModel):
 
 class AddActionRequest(BaseModel):
     item_id: str
-    action: str
-    confidence_tier: str
+    action: Literal["accept", "reject", "correct"]
+    confidence_tier: Literal["MEASURED", "DERIVED", "ASSUMED", "UNMAPPED"]
+    boq_item_id: _uuid.UUID | None = None
+    reason: str | None = None
+    corrected_value: float | None = None
 
 
 def _parse_uuid(value: str) -> _uuid.UUID:
@@ -96,6 +100,9 @@ def add_action(session_id: str, payload: AddActionRequest) -> dict:
                 item_id=payload.item_id,
                 action=payload.action,
                 confidence_tier=payload.confidence_tier,
+                boq_item_id=payload.boq_item_id,
+                reason=payload.reason,
+                corrected_value=payload.corrected_value,
             )
         )
         db.commit()
