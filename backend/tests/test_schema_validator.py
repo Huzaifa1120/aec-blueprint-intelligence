@@ -75,3 +75,21 @@ def test_validate_pre_migration_catches_drift():
 
     missing = [e for e in errors if e.issue == "missing_column" and e.table == "projects"]
     assert len(missing) >= 1, f"Expected missing column errors, got {errors}"
+
+
+def test_full_integration():
+    """Full integration: YAML -> validator -> DB -> clean validation."""
+    from sqlalchemy import create_engine
+    from app.db.base import Base
+    import app.db.models  # noqa: F401 — register all model tables
+    from app.db.validator import SchemaValidator
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    validator = SchemaValidator()
+    startup_errors = validator.validate_startup(engine)
+    migration_errors = validator.validate_pre_migration(Base.metadata)
+
+    critical = [e for e in startup_errors + migration_errors if e.severity == "error"]
+    assert len(critical) == 0, f"Integration test has errors: {critical}"

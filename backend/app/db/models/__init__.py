@@ -1,4 +1,4 @@
-from app.db.models.catalog import Assembly, AssemblyMaterial, Material, Price
+from app.db.models.catalog import Assembly, AssemblyMaterial, LaborRate, Material, Price
 from app.db.models.estimate import BoqItem, Estimate, Measurement
 from app.db.models.extraction import Layer, ScheduleBlock, TextAnnotation
 from app.db.models.geometry import Component, Route, Space
@@ -15,6 +15,7 @@ __all__ = [
     "DrawingQualityAssessment",
     "DrawingRevision",
     "Estimate",
+    "LaborRate",
     "Layer",
     "Material",
     "Measurement",
