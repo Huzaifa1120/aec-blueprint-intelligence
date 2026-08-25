@@ -62,14 +62,18 @@ def latest_labor_rate(db_session: Session, category: str) -> Optional[float]:
     a date still serve when they are the only row. A deployment whose
     migration chain predates the drifted ``labor_rates`` table (known gotcha)
     degrades to "no catalog rate" with a warning — resolution then falls to
-    YAML/unpriced instead of failing the run.
+    YAML/unpriced instead of failing the run. ONLY that exact condition
+    degrades: SQLite surfaces it as ``OperationalError("no such table: …")``
+    and any other failure (lock, connection loss, …) propagates loudly.
     """
     from datetime import date as _date
 
     global _LACKS_LABOR_RATES_TABLE
     try:
         rates = db_session.query(LRModel).filter(LRModel.category == category).all()
-    except OperationalError:
+    except OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise  # transient/unknown DB fault — never misread as "no table"
         if not _LACKS_LABOR_RATES_TABLE:
             _LACKS_LABOR_RATES_TABLE = True
             logging.getLogger(__name__).warning(

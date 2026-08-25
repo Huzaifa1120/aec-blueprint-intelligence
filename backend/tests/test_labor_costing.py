@@ -135,6 +135,19 @@ class TestComputeLaborCostResolution:
         assert result["total_cost"] == 112.5
         assert result["unpriced"] is False
 
+    def test_non_table_operational_error_propagates(self):
+        """Only 'no such table' degrades to YAML; other DB faults raise."""
+        from sqlalchemy.exc import OperationalError
+
+        class _LockedSession:
+            def query(self, *args, **kwargs):
+                raise OperationalError(
+                    "SELECT", {}, Exception("database is locked")
+                )
+
+        with pytest.raises(OperationalError):
+            compute_labor_cost(_LockedSession(), "electrical", 2.5, 45.0)
+
 
 def test_access_control_door_labor_block():
     """The last rule without rate/category joins the labor-costing contract."""
