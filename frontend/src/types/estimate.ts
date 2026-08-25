@@ -22,6 +22,9 @@ export interface BoqLine {
   unpriced: boolean
   confidence_status: ConfidenceStatus
   size_source: string | null
+  source_quality?: SourceQuality
+  item_id?: string
+  source?: { page: number; bbox: [number, number, number, number] } | null
 }
 
 export interface BoqRouteLine extends BoqLine {

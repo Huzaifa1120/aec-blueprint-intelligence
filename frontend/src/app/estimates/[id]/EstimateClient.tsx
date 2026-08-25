@@ -41,6 +41,7 @@ import { UnpricedGap } from "@/components/estimate/UnpricedGap"
 import { AssumedScaleBanner } from "@/components/estimate/AssumedScaleBanner"
 import type {
   BoqItem,
+  BoqLine,
   Discipline,
   EstimateBoq,
   NarrationResponse,
@@ -81,9 +82,18 @@ const safeStorage: LayoutStorage = {
   },
 }
 
+function mapSourceRegion(source: BoqLine["source"]): BoqItem["source"] {
+  if (!source) return undefined
+  const bbox = source.bbox
+  return {
+    page: source.page,
+    bbox: bbox ? { x1: bbox[0], y1: bbox[1], x2: bbox[2], y2: bbox[3] } : undefined,
+  }
+}
+
 export function normalizeBoq(boq: EstimateBoq): BoqItem[] {
   const routes: BoqItem[] = boq.routes.map((route, index) => ({
-    key: `route-${index}`,
+    key: route.item_id ?? `route-${index}`,
     description: route.material_name,
     quantity: route.quantity,
     unit: route.unit,
@@ -95,9 +105,11 @@ export function normalizeBoq(boq: EstimateBoq): BoqItem[] {
     route_type: route.route_type,
     length_m: route.length_m,
     discipline: classifyDiscipline(route.material_name),
+    source_quality: route.source_quality,
+    source: mapSourceRegion(route.source),
   }))
   const materials: BoqItem[] = boq.materials.map((material, index) => ({
-    key: `material-${index}`,
+    key: material.item_id ?? `material-${index}`,
     description: material.material_name,
     quantity: material.quantity,
     unit: material.unit,
@@ -107,6 +119,8 @@ export function normalizeBoq(boq: EstimateBoq): BoqItem[] {
     confidence_status: material.confidence_status,
     size_source: material.size_source,
     discipline: classifyDiscipline(material.material_name),
+    source_quality: material.source_quality,
+    source: mapSourceRegion(material.source),
   }))
   return [...routes, ...materials]
 }
@@ -361,7 +375,11 @@ function Workspace({ estimateId, boq }: WorkspaceProps) {
           className="flex min-h-0"
         >
           <div className="flex h-full w-full min-h-0 flex-col">
-            <PDFViewer src={null} highlightMessage={highlightMessage} ref={viewerRef} />
+            <PDFViewer
+              src={estimateId ? `${API_BASE}/api/estimates/${estimateId}/file` : null}
+              highlightMessage={highlightMessage}
+              ref={viewerRef}
+            />
           </div>
         </Panel>
         <Separator className="w-px shrink-0 bg-border transition-colors hover:bg-primary/60" />
