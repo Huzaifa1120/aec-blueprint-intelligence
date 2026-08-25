@@ -39,3 +39,39 @@ def test_validate_startup_catches_missing_column():
 
     missing_cols = [e for e in errors if e.issue == "missing_column" and e.table == "projects"]
     assert len(missing_cols) >= 1, f"Expected missing column errors, got {errors}"
+
+
+def test_startup_validation_runs_clean():
+    from sqlalchemy import create_engine, MetaData, Table, Column, String
+    from app.db.validator import SchemaValidator
+
+    engine = create_engine("sqlite:///:memory:")
+
+    validator = SchemaValidator()
+    metadata = MetaData()
+    for table_name, schema in validator.schemas.items():
+        cols = schema.get("columns", {})
+        columns = [Column(col_name, String(255)) for col_name in cols]
+        Table(table_name, metadata, *columns)
+    metadata.create_all(engine)
+
+    errors = validator.validate_startup(engine)
+    critical = [e for e in errors if e.severity == "error"]
+    assert len(critical) == 0, f"Startup validation has errors: {critical}"
+
+
+def test_validate_pre_migration_catches_drift():
+    """Validator catches YAML column not in SQLAlchemy metadata."""
+    from sqlalchemy import MetaData, Table, Column, String
+    from app.db.validator import SchemaValidator
+
+    metadata = MetaData()
+    Table("projects", metadata,
+          Column("id", String(36), primary_key=True),
+          Column("name", String(200), nullable=False))
+
+    validator = SchemaValidator()
+    errors = validator.validate_pre_migration(metadata)
+
+    missing = [e for e in errors if e.issue == "missing_column" and e.table == "projects"]
+    assert len(missing) >= 1, f"Expected missing column errors, got {errors}"

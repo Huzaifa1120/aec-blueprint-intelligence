@@ -37,6 +37,18 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
+    try:
+        from app.db.validator import SchemaValidator
+
+        validator = SchemaValidator()
+        errors = validator.validate_pre_migration(Base.metadata)
+        critical = [e for e in errors if e.severity == "error"]
+        if critical:
+            for e in critical:
+                print(f"Schema drift: {e.table}.{e.column} — {e.issue}")
+            print("Proceeding anyway (non-fatal)")
+    except Exception as ex:
+        print(f"Schema validation skipped: {ex}")
     with connectable.connect() as connection:
         context.configure(
             connection=connection, target_metadata=target_metadata

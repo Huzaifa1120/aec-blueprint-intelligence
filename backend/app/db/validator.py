@@ -60,3 +60,32 @@ class SchemaValidator:
                 ))
 
         return errors
+
+    def validate_pre_migration(self, metadata) -> list[SchemaError]:
+        """Compare YAML vs SQLAlchemy metadata (Base.metadata)."""
+        errors: list[SchemaError] = []
+
+        for table_name, schema in self.schemas.items():
+            if table_name not in metadata.tables:
+                errors.append(SchemaError(
+                    severity="info", table=table_name, column=None,
+                    issue="missing_table"
+                ))
+                continue
+
+            model_columns = {col.name for col in metadata.tables[table_name].columns}
+            yaml_columns = set(schema.get("columns", {}).keys())
+
+            for col in yaml_columns - model_columns:
+                errors.append(SchemaError(
+                    severity="warning", table=table_name, column=col,
+                    issue="missing_column"
+                ))
+
+            for col in model_columns - yaml_columns:
+                errors.append(SchemaError(
+                    severity="info", table=table_name, column=col,
+                    issue="extra_column"
+                ))
+
+        return errors
