@@ -27,7 +27,7 @@ export interface NormalizedImportError {
   message: string
 }
 
-export function normalizeImportError(error: CatalogImportError): NormalizedImportError {
+function normalizeImportError(error: CatalogImportError): NormalizedImportError {
   const rawRow =
     typeof error.row === "number" ? error.row : typeof error.index === "number" ? error.index : null
   return {
@@ -59,7 +59,7 @@ export function buildTemplateCsv(kind: TemplateKind): string {
   return [TEMPLATE_HEADERS[kind], ...TEMPLATE_ROWS[kind]].join("\n") + "\n"
 }
 
-export function downloadTemplate(kind: TemplateKind): void {
+function downloadTemplate(kind: TemplateKind): void {
   const blob = new Blob([buildTemplateCsv(kind)], { type: "text/csv;charset=utf-8" })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement("a")

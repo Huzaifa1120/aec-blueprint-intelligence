@@ -6,7 +6,7 @@ import { UploadCloud } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-export const MAX_PDF_BYTES = 50 * 1024 * 1024
+const MAX_PDF_BYTES = 50 * 1024 * 1024
 
 export const WRONG_FILE_TYPE_COPY = "Only PDF files are accepted. Select a different file."
 

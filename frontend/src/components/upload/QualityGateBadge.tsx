@@ -25,7 +25,7 @@ const TIER_STYLES: Record<
   },
 }
 
-export function formatLayerCounts(metrics: LayerRichnessMetrics): string {
+function formatLayerCounts(metrics: LayerRichnessMetrics): string {
   return `${metrics.distinct_ocg_count} layers · ${metrics.total_paths.toLocaleString(
     "en-US",
   )} paths`

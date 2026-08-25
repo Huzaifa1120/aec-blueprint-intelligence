@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/common/PageHeader"
 import { Button } from "@/components/ui/button"
 import { ESTIMATES_PER_PAGE, useEstimateList } from "@/hooks/useEstimateList"
 
-export function formatMoney(value: number): string {
+function formatMoney(value: number): string {
   return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 

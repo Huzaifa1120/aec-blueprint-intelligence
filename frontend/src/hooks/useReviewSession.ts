@@ -4,7 +4,7 @@ import { apiGet, apiPost } from "@/lib/api"
 import type { CatalogEntry } from "@/types/catalog"
 import type { MeasurementStatus } from "@/types/api"
 
-export function useCatalog() {
+function useCatalog() {
   return useQuery<CatalogEntry[], Error>({
     queryKey: ["catalog"],
     queryFn: () => apiGet<CatalogEntry[]>("/api/catalog/"),

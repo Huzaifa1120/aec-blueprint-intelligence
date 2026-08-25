@@ -22,12 +22,7 @@ import { ReviewControls } from "@/components/estimate/ReviewControls"
 import { cn } from "@/lib/utils"
 import type { BoqItem, Discipline, ReviewStatus } from "@/types/estimate"
 
-export const DISCIPLINES: readonly Discipline[] = [
-  "Electrical",
-  "Architectural",
-  "Mechanical",
-  "Envelope",
-]
+const DISCIPLINES: readonly Discipline[] = ["Electrical", "Architectural", "Mechanical", "Envelope"]
 
 const MECHANICAL_KEYWORDS = [
   "duct",
@@ -121,7 +116,7 @@ export function disciplineCounts(rows: BoqItem[]): DisciplineCounts {
 type Entry =
   { kind: "group"; key: string; label: string } | { kind: "row"; key: string; item: BoqItem }
 
-export function groupRowsByDiscipline(rows: BoqItem[]): Entry[] {
+function groupRowsByDiscipline(rows: BoqItem[]): Entry[] {
   const groups = new Map<string, BoqItem[]>()
   for (const row of rows) {
     const label = row.discipline ?? "Unclassified"
