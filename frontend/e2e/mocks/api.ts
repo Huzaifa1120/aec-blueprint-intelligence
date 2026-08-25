@@ -109,7 +109,7 @@ const SOURCE_PDF =
 
 const RUN_RESULT = {
   status: "vector",
-  scale: "1:100",
+  scale: { value: "1:100", status: "assumed" },
   routes_measured: 1,
   components_found: 27,
   estimate_id: ESTIMATE_ID,
