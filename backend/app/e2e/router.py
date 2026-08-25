@@ -4,7 +4,7 @@ Exposes ``POST /api/e2e/run`` which runs the full vector pipeline:
 
 1. ``classify_upload`` → decides vector/raster
 2. ``parse_pdf`` → extract drawings, text spans, build OCG registry
-3. ``detect_scale`` → read scale from title block
+3. ``resolve_scale`` → read scale from title block (or stamp assumed 1:100)
 4. ``measure_routes`` → CONDUIT / CABLE_TRAY lengths at detected scale
 5. ``count_components`` → discrete symbols (lighting, switches, trays, …);
    clusters on OCG layers that map to no assembly rule are surfaced as
@@ -53,7 +53,7 @@ from app.e2e.extraction import (
 from app.e2e.persistence import persist_extraction
 from app.ingestion.router import classify_upload
 from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, _scale_denominator, parse_pdf
-from app.parsing.scale import detect_scale
+from app.parsing.scale import resolve_scale
 from app.parsing.clustering import cluster_paths_threshold, derive_threshold_px
 from app.parsing.layer_registry import classify_layers, discipline_of
 from app.parsing.routes import measure_routes
@@ -133,6 +133,8 @@ def _adapt_spans_for_cascade(raw_text_spans: List[Dict]) -> List[Dict]:
 def _build_sheet_extraction(
     sheet_name: str | None,
     scale: Any,
+    scale_status: str | None,
+    scale_str: str | None,
     source_quality: str,
     routes: List[Dict],
     route_sizes: List[Dict | None],
@@ -171,6 +173,8 @@ def _build_sheet_extraction(
         sheet_name=sheet_name,
         page_number=None,
         scale=str(scale) if scale else None,
+        scale_status=scale_status,
+        scale_str=scale_str,
         discipline=None,
         source_quality=source_quality,
         layers=layers,
@@ -416,16 +420,21 @@ def e2e_run(
             classify_result = {"status": "raster"}
 
         if classify_result.get("status") != "vector":
+            # Raster path: no parsed text spans exist, so the run carries the
+            # explicit assumed-scale stamp (spec v3 §7.4) like every vector run.
+            assumed = resolve_scale([])
             return {
                 "status": "raster",
                 "detail": "PDF classified as raster; vector pipeline skipped.",
+                "scale": {"value": assumed.scale_str, "status": assumed.status},
             }
 
         source_quality = classify_result.get("source_quality", "layered_vector")
 
         # 2️⃣ Parse PDF
         parsed = parse_pdf(tmp_path)
-        scale = detect_scale(parsed.get("raw_text_spans", []))
+        scale_res = resolve_scale(parsed.get("raw_text_spans", []))
+        scale = scale_res.scale_str
         clusters = parsed.get("clusters", [])
         raw_drawings = parsed.get("raw_drawings", [])
         cascade_spans = _adapt_spans_for_cascade(parsed.get("raw_text_spans", []))
@@ -577,6 +586,8 @@ def e2e_run(
         extraction = _build_sheet_extraction(
             sheet_name=sheet_name,
             scale=scale,
+            scale_status=scale_res.status,
+            scale_str=scale_res.scale_str,
             source_quality=source_quality,
             routes=routes,
             route_sizes=route_sizes,
@@ -596,7 +607,7 @@ def e2e_run(
 
         response: Dict[str, Any] = {
             "status": "ok",
-            "scale": scale,
+            "scale": {"value": scale_res.scale_str, "status": scale_res.status},
             "routes_measured": len(routes),
             "components_found": len(components),
             "boq_items": boq_items,

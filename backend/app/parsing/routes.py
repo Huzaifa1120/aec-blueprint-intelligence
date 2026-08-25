@@ -74,7 +74,9 @@ def compute_length_meters(
     try:
         denominator = float(scale.split(":")[1])
     except (IndexError, ValueError):
-        denominator = 1.0  # fallback: assume 1:1
+        # Spec v3 §7.4: never assume 1:1. Unparseable == missing → 1:100,
+        # and the pipeline stamps such runs scale_status="assumed".
+        denominator = 100.0
 
     # corrected 2026-08-22: pt→paper-mm→real-m conversion
     # (was treating pt as meters; physically impossible outputs,

@@ -94,3 +94,8 @@ class SheetExtraction:
     routes: list[RouteRow] = field(default_factory=list)
     schedule_blocks: list[ScheduleBlockRow] = field(default_factory=list)
     text_annotations: list[TextAnnotationRow] = field(default_factory=list)
+    # Scale honesty (spec v3 §7.4): how `scale` was obtained.
+    # status "detected" = read from sheet text; "assumed" = absent/unparseable,
+    # pipeline fell back to 1:100 and flags the run for review.
+    scale_status: str | None = None
+    scale_str: str | None = None

@@ -20,6 +20,7 @@ import pymupdf  # MUST import pymupdf, never fitz
 import numpy as np
 
 from app.parsing.clustering import cluster_paths_threshold, derive_threshold_px
+from app.parsing.scale import resolve_scale
 
 # Symbol/route separation (spec v3 §7.4 geometry-type branching): paths whose
 # bbox diagonal exceeds SYMBOL_CUTOFF_FACTOR × the merge threshold are
@@ -190,32 +191,8 @@ def cluster_paths(
 
 
 # ---------------------------------------------------------------------------
-# Scale detection from text spans
+# Scale helpers
 # ---------------------------------------------------------------------------
-
-
-def detect_scale(text_spans: List[TextSpan], default: str = "1:100") -> str:
-    """Detect drawing scale from text spans (title block / dimension strings).
-
-    Looks for patterns like "1:100", "1/4\"=1'-0\"", etc.
-    Never assumes a scale — reads from sheet if present.
-
-    Returns the detected scale string, or the default if none found.
-    """
-    scale_patterns = [
-        r"\b(\d+\.\d+:\d+)\b",   # e.g., 1:100, 1:50
-        r"\b(\d+:\d+)\b",
-        r"\b(1/4|1/2|1/8)\"=1'-0\"\b",  # architectural scales
-    ]
-
-    for span in text_spans:
-        text = span["text"]
-        for pattern in scale_patterns:
-            m = re.search(pattern, text)
-            if m:
-                return m.group(1)
-
-    return default
 
 
 def _scale_denominator(scale_str: str) -> float:
@@ -259,13 +236,15 @@ def parse_pdf(pdf_path: str) -> dict:
             all_drawings.extend(extract_drawings(page))
             all_text_spans.extend(extract_text_spans(page))
 
-        # Detect scale
-        scale = detect_scale(all_text_spans, default="1:100")
+        # Detect scale (spec v3 §7.4): single structured resolver — detected
+        # from the sheet, or an explicit "assumed" 1:100 stamp when absent.
+        scale_res = resolve_scale(all_text_spans)
+        scale = scale_res.scale_str
 
         # Cluster threshold from the sheet's own scale (spec v3 §7.4):
         # mm→pt via the scale denominator; fallback 5.0 pt until a
         # legend-derived mm threshold exists (logged inside derive_threshold_px).
-        threshold_px = derive_threshold_px(None, _scale_denominator(scale))
+        threshold_px = derive_threshold_px(None, scale_res.denominator)
         max_symbol_diagonal_px = threshold_px * SYMBOL_CUTOFF_FACTOR
 
         # Cluster layers — access control (MVP focus) + electrical layers.
