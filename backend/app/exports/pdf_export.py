@@ -24,6 +24,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.common.normalize import nonzero_counters
 from app.exports import UNPRICED_LABEL
 
 HEADERS = [
@@ -71,18 +72,6 @@ def _line_cells(line: dict) -> list[str]:
         "YES" if unpriced else "NO",
         str(line.get("confidence_status") or ""),
         "" if size_source is None else str(size_source),
-    ]
-
-
-def _nonzero_counters(data_quality: object) -> list[tuple[str, int]]:
-    """Only counters that actually fired are disclosed; scale_str is a string
-    and zero counters stay out."""
-    if not isinstance(data_quality, dict):
-        return []
-    return [
-        (name, value)
-        for name, value in data_quality.items()
-        if isinstance(value, int) and not isinstance(value, bool) and value != 0
     ]
 
 
@@ -172,7 +161,7 @@ def render(rows: dict) -> bytes:
         )
         story.append(totals_table)
 
-    counters = _nonzero_counters(rows.get("data_quality"))
+    counters = nonzero_counters(rows.get("data_quality"))
     if counters:
         story.append(Spacer(1, 10))
         story.append(Paragraph("Data Quality", styles["Heading2"]))

@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as OrmSession
 
+from app.db.models.estimate import BoqItem
 from app.db.models.review import ReviewAction, ReviewSession, utcnow
 from app.db.session import get_engine
 
@@ -94,6 +95,10 @@ def add_action(session_id: str, payload: AddActionRequest) -> dict:
         session = db.get(ReviewSession, sid)
         if session is None:
             raise HTTPException(status_code=404, detail="Review session not found")
+        if payload.boq_item_id is not None and db.get(BoqItem, payload.boq_item_id) is None:
+            # SQLite does not enforce this FK; reject dangling references here
+            # so they cannot silently pollute the corrections annex join.
+            raise HTTPException(status_code=400, detail="Unknown boq_item_id")
         db.add(
             ReviewAction(
                 session_id=session.id,

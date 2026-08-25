@@ -14,6 +14,7 @@ import io
 
 from openpyxl import Workbook
 
+from app.common.normalize import nonzero_counters
 from app.exports import UNPRICED_LABEL
 
 SHEET_NAME = "BOQ"
@@ -38,18 +39,6 @@ COL_TOTAL_COST = 5
 COL_UNPRICED = 6
 COL_CONFIDENCE = 7
 COL_SIZE_SOURCE = 8
-
-
-def _nonzero_counters(data_quality: object) -> list[tuple[str, int]]:
-    """Only counters that actually fired are disclosed; scale_str is a string
-    and zero counters stay out."""
-    if not isinstance(data_quality, dict):
-        return []
-    return [
-        (name, value)
-        for name, value in data_quality.items()
-        if isinstance(value, int) and not isinstance(value, bool) and value != 0
-    ]
 
 
 CORRECTION_HEADERS = ["Item / Material", "Action", "Reason", "Corrected Value", "Date"]
@@ -104,7 +93,7 @@ def render(rows: dict) -> bytes:
         ):
             if key in totals:
                 ws.append([label, None, None, None, totals[key], None, None, None])
-    counters = _nonzero_counters(rows.get("data_quality"))
+    counters = nonzero_counters(rows.get("data_quality"))
     if counters:
         ws.append([])
         ws.append(["Data Quality"])

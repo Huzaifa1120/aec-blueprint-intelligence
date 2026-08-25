@@ -535,7 +535,7 @@ def test_xlsx_export_carries_data_quality_and_corrections(client):
             project_id=project.id,
             total_material_cost=10.0,
             total_cost=10.0,
-            scale_status="parsed",
+            scale_status="detected",
             data_quality_json=json.dumps(
                 {"scale_str": "1:100", "dropped_routes": 2, "unmapped_count": 0}
             ),

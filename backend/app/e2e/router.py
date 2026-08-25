@@ -60,7 +60,7 @@ from app.e2e.persistence import (
     persist_extraction,
 )
 from app.ingestion.router import classify_upload
-from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, _scale_denominator, parse_pdf
+from app.ingestion.vector import SYMBOL_CUTOFF_FACTOR, parse_pdf
 from app.parsing.scale import resolve_scale
 from app.parsing.clustering import cluster_paths_threshold, derive_threshold_px
 from app.parsing.layer_registry import classify_layers, discipline_of
@@ -79,6 +79,7 @@ from app.parsing.text_walker import associate_text, probe_span_ocgs
 from app.assembly.formulas import FormulaValidationError
 from app.assembly.rules import apply_assembly, load_assembly_rule
 from app.catalog.prices import compute_boq_item, compute_labor_cost
+from app.common.normalize import source_region
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -92,23 +93,6 @@ router = APIRouter(prefix="/api/e2e", tags=["e2e"])
 # ---------------------------------------------------------------------------
 # Helper: compute BOQ line from a material + quantity
 # ---------------------------------------------------------------------------
-def _source_block(page: Any, bbox: Any) -> Optional[Dict[str, Any]]:
-    """Normalized click-through region for one BOQ row (spec v3 §7.12).
-
-    ``{"page": int, "bbox": [x0, y0, x1, y1]}`` in PDF points, or None when
-    no usable region exists — persistence stores exactly this shape.
-    """
-    if not bbox:
-        return None
-    try:
-        corners = [float(v) for v in bbox]
-    except (TypeError, ValueError):
-        return None
-    if len(corners) < 4:
-        return None
-    return {"page": int(page or 0), "bbox": corners}
-
-
 def _boq_line(
     assembly_type: str,
     material_name: str,
@@ -272,7 +256,7 @@ def _build_sheet_extraction(
                 size_json=route_sizes[index],
                 page=int(route.get("page") or 0),
                 bbox=(
-                    _source_block(route.get("page"), route.get("bbox")) or {}
+                    source_region(route.get("page"), route.get("bbox")) or {}
                 ).get("bbox"),
             )
             for index, route in enumerate(routes)
@@ -292,7 +276,7 @@ def _build_sheet_extraction(
                 source_path_ids=list(comp.get("source_path_ids", [])),
                 page=int(comp.get("page") or 0),
                 bbox=(
-                    _source_block(comp.get("page"), comp.get("bbox")) or {}
+                    source_region(comp.get("page"), comp.get("bbox")) or {}
                 ).get("bbox"),
             )
             for comp in components
@@ -336,15 +320,15 @@ def _span_ocg_map(pdf_path: str, raw_text_spans: List[Dict]) -> dict[int, str]:
 def _unmapped_layer_clusters(
     ocg_registry: Dict[str, Dict],
     raw_drawings: List[Dict],
-    scale: Any,
+    denominator: float,
 ) -> List[Dict]:
     """Cluster symbol-scale paths on OCG layers that map to no assembly rule.
 
-    Uses the same fallback threshold parse_pdf clusters mapped layers with
-    (no legend-derived mm threshold exists yet), so unmapped clustering stays
-    consistent with the mapped pipeline (spec v3 §7.4/§7.9).
+    Clusters at the same resolved-scale threshold parse_pdf clusters mapped
+    layers with (no legend-derived mm threshold exists yet), so unmapped
+    clustering stays consistent with the mapped pipeline (spec v3 §7.4/§7.9).
     """
-    threshold_px = derive_threshold_px(None, _scale_denominator(str(scale or "")))
+    threshold_px = derive_threshold_px(None, denominator)
     max_symbol_diagonal_px = threshold_px * SYMBOL_CUTOFF_FACTOR
     clusters: List[Dict] = []
     for layer_name in ocg_registry or {}:
@@ -389,7 +373,7 @@ def _route_layer_clusters(raw_drawings: List[Dict], scale: Any) -> List[Dict]:
     reachable; symbol clustering and its certified count baselines are
     untouched.
     """
-    threshold_px = derive_threshold_px(None, _scale_denominator(str(scale or "")))
+    threshold_px = derive_threshold_px(None, _scale_denominator(str(scale or "")))  # noqa: F821 — deferred: legacy _scale_denominator → pass scale_res.denominator next router touch
     clusters: List[Dict] = []
     for layer_name in route_layers():
         clusters.extend(
@@ -592,7 +576,7 @@ def e2e_run(
         # OCG layers that map to no rule are surfaced as UNMAPPED entries —
         # reported and persisted, never priced (spec v3 §7.9).
         unmapped_clusters = _unmapped_layer_clusters(
-            parsed.get("ocg_registry") or {}, raw_drawings, scale
+            parsed.get("ocg_registry") or {}, raw_drawings, scale_res.denominator
         )
         all_components = count_components(
             clusters + unmapped_clusters, raw_drawings, include_unmapped=True
@@ -694,7 +678,7 @@ def e2e_run(
                             size_source=size_source,
                             rule_version=applied.get("rule_version"),
                             scale_assumed=(scale_status == "assumed"),
-                            source=_source_block(
+                            source=source_region(
                                 route.get("page"), route.get("bbox")
                             ),
                         )
@@ -720,7 +704,7 @@ def e2e_run(
                             size_source=size_source,
                             rule_version=applied.get("rule_version"),
                             scale_assumed=(scale_status == "assumed"),
-                            source=_source_block(
+                            source=source_region(
                                 route.get("page"), route.get("bbox")
                             ),
                             labor_payload=labor_payload,
@@ -772,7 +756,7 @@ def e2e_run(
                             derivation=mat.get("derivation"),
                             size_source=None,
                             rule_version=rule.get("rule_version"),
-                            source=_source_block(
+                            source=source_region(
                                 comp.get("page"), comp.get("bbox")
                             ),
                         )
@@ -795,7 +779,7 @@ def e2e_run(
                             source_quality=source_quality,
                             size_source=None,
                             rule_version=rule.get("rule_version"),
-                            source=_source_block(
+                            source=source_region(
                                 comp.get("page"), comp.get("bbox")
                             ),
                             labor_payload=labor_payload,

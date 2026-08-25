@@ -107,7 +107,7 @@ export interface E2eUnmappedItem {
 export interface E2eRunResult {
   status?: string
   detail?: string
-  scale?: string | null
+  scale?: { value: string; status: "detected" | "assumed" } | null
   routes_measured?: number
   components_found?: number
   estimate_id?: string

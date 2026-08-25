@@ -25,13 +25,13 @@ import json
 import logging
 import uuid
 from pathlib import Path
-from typing import Any
 
 from sqlalchemy.orm import Session as OrmSession
 
 from app.assembly.formulas import FormulaValidationError
 from app.assembly.rules import apply_assembly, load_assembly_rule
 from app.catalog.prices import compute_boq_item, compute_labor_cost
+from app.common.normalize import source_region
 from app.core.config import get_settings
 from app.db.models.estimate import BoqItem, Estimate, Measurement
 from app.db.models.extraction import Layer, ScheduleBlock, TextAnnotation
@@ -72,23 +72,6 @@ def live_confidence_tier(
     if source_quality == "degraded_vector":
         score = round(score * get_settings().degraded_confidence_multiplier, 4)
     return tier, score
-
-
-def _source_region(page: int | None, bbox: Any) -> dict | None:
-    """Normalized click-through region ``{"page", "bbox"}``; None when absent.
-
-    Same shape the live response carries in each BOQ row's ``source`` block,
-    so payload round-trips are value-identical.
-    """
-    if not bbox:
-        return None
-    try:
-        corners = [float(v) for v in bbox]
-    except (TypeError, ValueError):
-        return None
-    if len(corners) < 4:
-        return None
-    return {"page": int(page or 0), "bbox": corners}
 
 
 def _resolve_project(db: OrmSession, project_id: uuid.UUID | None) -> Project:
@@ -660,6 +643,7 @@ def persist_extraction(
     estimate = Estimate(
         project_id=project.id,
         scale_status=extraction.scale_status,
+        source_quality=extraction.source_quality,
         data_quality_json=json.dumps(
             {"scale_str": extraction.scale_str, **(extraction.data_quality or {})}
         ),
@@ -686,7 +670,7 @@ def persist_extraction(
             (row.size_json or {}).get("source"),
             row.layer_ocg,
             scale_status=extraction.scale_status,
-            source=_source_region(row.page, row.bbox),
+                source=source_region(row.page, row.bbox),
         )
 
     # Legend-gated REVIEW components (app.parsing.gating) are persisted for
@@ -716,7 +700,7 @@ def persist_extraction(
                 row.confidence_status,
                 extraction.source_quality,
                 extraction.rule_version,
-                source=_source_region(row.page, row.bbox),
+            source=source_region(row.page, row.bbox),
             )
         consumed[key] += 1
 

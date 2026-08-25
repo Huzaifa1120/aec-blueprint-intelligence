@@ -102,6 +102,10 @@ def payload_from_estimate(estimate: Estimate) -> dict:
             "confidence_status": item.confidence_status
             or getattr(measurement, "confidence_status", "MEASURED"),
             "confidence_score": item.confidence_score,
+            # §7.12 run verdict, stamped per row exactly as the live response
+            # spelled it; legacy estimates read 'layered_vector' via the
+            # migration's server default.
+            "source_quality": estimate.source_quality,
             # Click-through region; None on legacy rows (never a crash).
             "source": parse_json_object(item.source_bbox_json),
             "size_source": item.size_source,

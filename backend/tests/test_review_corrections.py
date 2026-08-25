@@ -154,6 +154,40 @@ def test_legacy_free_string_action_rejected_422(tmp_path, monkeypatch):
     assert resp.status_code == 422
 
 
+def test_unknown_boq_item_id_rejected_400_and_not_persisted(tmp_path, monkeypatch):
+    # contract change: spec conformance 2026-08-25 — SQLite does not enforce the
+    # review_actions.boq_item_id FK, so dangling references are rejected at the
+    # router (400: invalid client-supplied reference; 404 stays reserved for the
+    # session path) instead of polluting corrections_from_estimate joins.
+    from uuid import uuid4
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session as OrmSession
+
+    from app.db.models.review import ReviewAction
+    from app.main import app
+
+    engine = _make_engine(tmp_path)
+    monkeypatch.setattr("app.review.router.get_engine", lambda: engine)
+    client = TestClient(app)
+    sid = _seed_review_session(client)
+
+    resp = client.post(
+        f"/api/review/sessions/{sid}/actions",
+        json={
+            "item_id": "row-1",
+            "action": "correct",
+            "confidence_tier": "MEASURED",
+            "boq_item_id": str(uuid4()),
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.json() == {"detail": "Unknown boq_item_id"}
+
+    with OrmSession(engine) as db:
+        assert db.query(ReviewAction).count() == 0
+
+
 def test_invalid_body_types_rejected_422(tmp_path, monkeypatch):
     from uuid import uuid4
 
