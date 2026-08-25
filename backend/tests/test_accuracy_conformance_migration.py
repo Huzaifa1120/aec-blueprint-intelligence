@@ -34,6 +34,11 @@ def test_accuracy_conformance_columns_and_table(tmp_path: Path) -> None:
     boq_cols = {c["name"] for c in insp.get_columns("boq_items")}
     assert {"source_bbox_json"} <= boq_cols
     est_cols = {c["name"] for c in insp.get_columns("estimates")}
-    assert {"data_quality_json", "scale_status", "source_pdf_path"} <= est_cols
+    assert {
+        "data_quality_json",
+        "scale_status",
+        "source_pdf_path",
+        "source_quality",
+    } <= est_cols
     act_cols = {c["name"] for c in insp.get_columns("review_actions")}
     assert {"boq_item_id", "reason", "corrected_value"} <= act_cols
