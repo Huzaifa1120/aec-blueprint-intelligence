@@ -242,7 +242,7 @@ export default function UploadPage() {
           {STEPS.map((step) => (
             <li
               key={step.n}
-              className="rounded-lg border border-outline-variant bg-paper p-5 transition-colors hover:border-safety-amber"
+              className="rounded-lg border border-border bg-card p-5 transition-colors hover:border-safety-amber"
             >
               <p className="label-mono text-steel">Step {step.n}</p>
               <h2 className="mt-1 font-heading text-[17px] leading-[22px] text-ink-black">
