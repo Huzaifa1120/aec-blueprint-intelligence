@@ -28,4 +28,3 @@ test("upload flow: check → quality verdict → run takeoff → workspace", asy
   await expect(page.getByTestId("boq-table")).toBeVisible()
   expect(consoleErrors.filter((line) => !line.includes("favicon"))).toEqual([])
 })
-

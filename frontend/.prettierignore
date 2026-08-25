@@ -1,6 +1,8 @@
 node_modules
 .next
 out
-package-lock.json
+bun.lock
 *.md
 public/pdf.worker*.mjs
+test-results
+playwright-report

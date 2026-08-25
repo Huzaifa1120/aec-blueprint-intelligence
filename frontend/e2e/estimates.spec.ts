@@ -1,10 +1,7 @@
 import { expect, test } from "./fixtures"
 import { ESTIMATE_ID } from "./mocks/api"
 
-test("estimates index lists takeoffs and links to workspace", async ({
-  page,
-  consoleErrors,
-}) => {
+test("estimates index lists takeoffs and links to workspace", async ({ page, consoleErrors }) => {
   await page.goto("/estimates")
   await expect(page.getByRole("heading", { name: "Estimates" })).toBeVisible()
 
