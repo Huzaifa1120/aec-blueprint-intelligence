@@ -11,7 +11,10 @@ def test_defaults() -> None:
     )
     assert s.app_env == "development"
     assert s.database_url == "sqlite:///./aec.db"
-    assert s.cors_origins == ["http://localhost:3000"]
+    assert s.cors_origins == [
+        "http://localhost:3000",
+        "https://aec-blueprint-intelligence.vercel.app",
+    ]
     assert s.log_level == "INFO"
 
 
