@@ -19,7 +19,9 @@ class Component(Base):
     y: Mapped[float]
     confidence_status: Mapped[str] = mapped_column(String(20), default="MEASURED")
     confidence_score: Mapped[float] = mapped_column(default=1.0)
-    layer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("layers.id"))
+    layer_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("layers.id", ondelete="SET NULL")
+    )
     source_quality: Mapped[str] = mapped_column(String(20), default="layered_vector")
 
     sheet: Mapped["Sheet"] = relationship(back_populates="components")
@@ -37,7 +39,9 @@ class Route(Base):
     length_m: Mapped[float | None]
     confidence_status: Mapped[str] = mapped_column(String(20), default="MEASURED")
     confidence_score: Mapped[float] = mapped_column(default=1.0)
-    layer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("layers.id"))
+    layer_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("layers.id", ondelete="SET NULL")
+    )
     source_quality: Mapped[str] = mapped_column(String(20), default="layered_vector")
     size_json: Mapped[str | None] = mapped_column(Text, default=None)
     # JSON text: {width_mm,height_mm|diameter_mm,source,ref}
@@ -57,7 +61,9 @@ class Space(Base):
     area_m2: Mapped[float | None]
     confidence_status: Mapped[str] = mapped_column(String(20), default="MEASURED")
     confidence_score: Mapped[float] = mapped_column(default=1.0)
-    layer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("layers.id"))
+    layer_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("layers.id", ondelete="SET NULL")
+    )
     source_quality: Mapped[str] = mapped_column(String(20), default="layered_vector")
 
     sheet: Mapped["Sheet"] = relationship(back_populates="spaces")
