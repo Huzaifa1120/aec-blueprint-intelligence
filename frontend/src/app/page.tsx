@@ -103,13 +103,16 @@ export default function UploadPage() {
   }
 
   function startRun() {
+    console.log("[takeoff] startRun called", { hasFile: !!file, hasQuality: !!quality, phase })
     if (!file || !quality) return
     setRunFailureDetail(null)
     setPhase("running")
+    console.log("[takeoff] calling pipeline.mutate with file:", file.name)
     pipeline.mutate(
       { file, persist: true },
       {
         onSuccess: (result) => {
+          console.log("[takeoff] onSuccess", result)
           if (result.status === "raster") {
             setRunFailureDetail(
               result.detail ?? "The drawing could not be processed by the vector pipeline.",
@@ -127,6 +130,7 @@ export default function UploadPage() {
           setPhase("ready")
         },
         onError: (error: Error) => {
+          console.error("[takeoff] onError", error)
           setRunFailureDetail(error.message)
           setPhase("ready")
         },

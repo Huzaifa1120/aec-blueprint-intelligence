@@ -30,6 +30,15 @@ from app.catalog.prices import (
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _clear_price_cache():
+    """Clear module-level price/labor caches before every test."""
+    from app.catalog.prices import invalidate_price_cache
+    invalidate_price_cache()
+    yield
+    invalidate_price_cache()
+
+
 @pytest.fixture(scope="function")
 def db_session():
     """Create a fresh in-memory SQLite session for each test."""

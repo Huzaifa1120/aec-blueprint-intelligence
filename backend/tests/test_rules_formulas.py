@@ -17,7 +17,7 @@ DUCT_RULE = {
         },
         "duct_fitting": 0.2,  # legacy linear multiplier
         "hanger_kit": {"gauge_lookup": {"by": "max_mm",
-                                         "rows": {600: "hanger_light", 999999: "hanger_heavy"}}},
+                                         "rows": {600: "hanger_kit_light", 999999: "hanger_kit_heavy"}}},
     },
     "labor": {"installation_hours": 2.0, "hourly_rate": 50.0, "category": "mechanical"},
 }
@@ -29,7 +29,9 @@ def duct_rule(tmp_path, monkeypatch):
     rules_dir.mkdir()
     (rules_dir / "duct_rectangular.yaml").write_text(yaml.safe_dump(DUCT_RULE))
     monkeypatch.setattr("app.assembly.rules._ASSEMBLIES_DIR", rules_dir)
-    return rules_dir
+    load_assembly_rule.cache_clear()
+    yield rules_dir
+    load_assembly_rule.cache_clear()
 
 
 class TestLoadAssemblyRule:
@@ -58,14 +60,14 @@ class TestApplyAssemblyFormulas:
         assert by_name["duct_fitting"]["quantity"] == pytest.approx(2.0)
         assert by_name["duct_fitting"]["derivation"] is None
         # gauge lookup resolved to a material line
-        assert by_name["hanger_light"]["quantity"] == pytest.approx(1.0)
-        assert by_name["hanger_light"]["derivation"]["gauge_lookup"]["by"] == "max_mm"
+        assert by_name["hanger_kit_light"]["quantity"] == pytest.approx(1.0)
+        assert by_name["hanger_kit_light"]["derivation"]["gauge_lookup"]["by"] == "max_mm"
 
     def test_gauge_boundary_selects_heavy(self, duct_rule):
         variables = {"length_m": 1.0, "width_mm": 800, "height_mm": 400}
         result = apply_assembly("duct_rectangular", variables=variables)
         names = {m["material_name"] for m in result["materials"]}
-        assert "hanger_heavy" in names
+        assert "hanger_kit_heavy" in names
 
     def test_formula_without_variables_fails_closed(self, duct_rule):
         with pytest.raises(FormulaValidationError):

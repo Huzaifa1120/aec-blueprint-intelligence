@@ -33,5 +33,6 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export async function apiPostForm<T>(path: string, form: FormData): Promise<T> {
+  console.log(`[api] POST ${API_BASE}${path}`)
   return parse<T>(await fetch(`${API_BASE}${path}`, { method: "POST", body: form }))
 }

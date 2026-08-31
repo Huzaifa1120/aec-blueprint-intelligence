@@ -1,0 +1,22 @@
+name: dali_lighting_control
+rule_version: "1.0.0"
+legend_keywords:
+  - DALI
+  - DALI LOOP
+  - LCP
+  - LIGHTING CONTROL PANEL
+  - CONTROL WIRING
+  - EIB
+  - SMART SWITCH
+  - KEYPAD
+description: DALI digital addressable lighting interface control systems, including control panels, loops, and wiring
+bom:
+  dali_driver: 1.0
+  control_wire_pair: 1.0
+  emt_conduit: 0.4
+  conduit_fitting: 0.05
+labor:
+  installation_hours: 0.3
+  hourly_rate: 45.00
+  category: electrical
+waste_factor: 0.10

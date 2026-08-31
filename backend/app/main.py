@@ -1,8 +1,10 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.db.session import db_ping
+from app.db.session import db_ping, validate_schema_background
 
 from app.catalog.router import router as catalog_router
 from app.drawings.router import router as drawings_router
@@ -15,7 +17,18 @@ from app.review.router import router as review_router
 
 settings = get_settings()
 
-app = FastAPI(title="AEC Blueprint Intelligence System", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    validate_schema_background()
+    yield
+
+
+app = FastAPI(
+    title="AEC Blueprint Intelligence System",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,

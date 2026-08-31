@@ -5,6 +5,27 @@ legend_keywords:
   - LIGHT FIXTURE
   - LAMP
   - LUMINAIRE
+  - LED PANEL
+  - LED WATER PROOF
+  - RECESSED
+  - DOWNLIGHT
+  - CEILING MOUNTED
+  - WALL LIGHT
+  - COVE LIGHT
+  - FLEX LED
+  - FIXTURE
+description: Standard lighting fixtures including LED panels, downlights, wall lights, cove lights, and LED flex
+fixture_types:
+  - tag_pattern: "R[0-9]+"
+    description: Regular room fixtures
+  - tag_pattern: "S[0-9]+"
+    description: Special area fixtures
+  - tag_pattern: "C[0-9]+"
+    description: Corridor fixtures
+  - tag_pattern: "W[0-9]+"
+    description: Wall-mounted fixtures
+  - tag_pattern: "L[0-9]+"
+    description: Linear fixtures
 bom:
   lighting_unit: 1.0
   lampholder: 1.0

@@ -251,21 +251,23 @@ def parse_pdf(pdf_path: str) -> dict:
         # Layer set is data-driven via the layer mapping (data/layer_mapping.yaml)
         # plus the legacy Phase 1 access-control names, so a new sheet's layer
         # names cluster without source changes.
+        # PERFORMANCE: Only cluster layers that actually have paths in the PDF
+        # to avoid O(mapped_layers × drawings) waste.
         from app.parsing.layer_map import all_mapped_layers
 
         ac_layer_names = ("AC", "ACCESS_CONTROL", "SECURITY", "CARD_READER")
-        layer_names = list(all_mapped_layers()) + list(ac_layer_names)
-        # De-duplicate while preserving order.
-        seen: set[str] = set()
-        unique_layers: list[str] = []
-        for name in layer_names:
-            if name not in seen:
-                seen.add(name)
-                unique_layers.append(name)
+        mapped_layers = set(all_mapped_layers()) | set(ac_layer_names)
+
+        # Find which mapped layers actually have paths in this PDF
+        pdf_layers: set[str] = set()
+        for d in all_drawings:
+            layer = d.get("layer")
+            if layer and layer in mapped_layers:
+                pdf_layers.add(layer)
 
         clusters: List[ClusterResult] = []
 
-        for layer_name in unique_layers:
+        for layer_name in pdf_layers:
             layer_clusters = cluster_paths_threshold(
                 all_drawings,
                 layer_name,

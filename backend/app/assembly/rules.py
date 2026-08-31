@@ -11,6 +11,7 @@ Adding a new assembly type requires YAML edit, not code change.
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 
 import yaml
 from pathlib import Path
@@ -41,9 +42,7 @@ _DERIVED_VARIABLE_SOURCES: Dict[str, tuple] = {
 }
 
 
-def _effective_variables(
-    rule: Dict, variables: Optional[Dict[str, float]]
-) -> Dict[str, float]:
+def _effective_variables(rule: Dict, variables: Optional[Dict[str, float]]) -> Dict[str, float]:
     """Bind evaluation inputs: rule defaults < caller variables < derived."""
     effective: Dict[str, float] = {}
     for key, value in (rule.get("defaults") or {}).items():
@@ -83,11 +82,7 @@ def _validate_rule_data(data: Dict, source_name: str) -> List[str]:
         if "gauge_lookup" in entry:
             table = entry.get("gauge_lookup") or {}
             driver = table.get("by", "")
-            if (
-                driver
-                and driver not in declared
-                and driver not in _DERIVED_VARIABLE_SOURCES
-            ):
+            if driver and driver not in declared and driver not in _DERIVED_VARIABLE_SOURCES:
                 errors.append(
                     f"{source_name}: bom.{mat_name}: gauge driver "
                     f"'{driver}' not in declared variables"
@@ -95,6 +90,7 @@ def _validate_rule_data(data: Dict, source_name: str) -> List[str]:
     return errors
 
 
+@lru_cache(maxsize=64)
 def load_assembly_rule(name: str) -> Optional[Dict]:
     """Load a YAML rule set by assembly name.
 
@@ -106,6 +102,8 @@ def load_assembly_rule(name: str) -> Optional[Dict]:
     Fail-closed gate: a rule file that fails the same validation as
     ``validate_rule_file`` is excluded (returns None) with a warning —
     the rest of the catalog keeps serving.
+
+    Cached: YAML files don't change during a request.
     """
     yaml_path = _ASSEMBLIES_DIR / f"{name}.yaml"
     if not yaml_path.exists():
@@ -138,6 +136,7 @@ def load_assembly_rule(name: str) -> Optional[Dict]:
     }
 
 
+@lru_cache(maxsize=1)
 def all_legend_keywords() -> Dict[str, List[str]]:
     """Map assembly name → its YAML-declared legend keywords.
 
@@ -147,6 +146,8 @@ def all_legend_keywords() -> Dict[str, List[str]]:
     runtime. Used by the legend whitelist gate (app.parsing.gating) so the
     sheet's own legend decides which symbol types are legal — never a
     hardcoded vocabulary.
+
+    Cached: YAML files don't change during a request.
     """
     index: Dict[str, List[str]] = {}
     for yaml_path in sorted(_ASSEMBLIES_DIR.glob("*.yaml")):
@@ -169,6 +170,7 @@ def all_legend_keywords() -> Dict[str, List[str]]:
 # ---------------------------------------------------------------------------
 # Rule engine: apply assembly to a component type
 # ---------------------------------------------------------------------------
+
 
 def apply_assembly(
     component_type: str,
@@ -216,35 +218,41 @@ def apply_assembly(
             quantity = evaluate_formula(entry["formula"], effective, lookup_name)
             waste = float(entry.get("waste_factor", rule["waste_factor"]))
             quantity *= 1.0 + waste
-            materials.append({
-                "material_name": mat_name,
-                "quantity": quantity,
-                "unit": _infer_unit(mat_name),
-                "derivation": {"formula": entry["formula"], "inputs": caller_vars},
-            })
+            materials.append(
+                {
+                    "material_name": mat_name,
+                    "quantity": quantity,
+                    "unit": _infer_unit(mat_name),
+                    "derivation": {"formula": entry["formula"], "inputs": caller_vars},
+                }
+            )
         elif isinstance(entry, dict) and "gauge_lookup" in entry:
             resolved = lookup_gauge(entry["gauge_lookup"], effective)
-            materials.append({
-                "material_name": resolved,
-                "quantity": 1.0,
-                "unit": "ea",
-                "derivation": {
-                    "gauge_lookup": entry["gauge_lookup"],
-                    "inputs": caller_vars,
-                },
-            })
+            materials.append(
+                {
+                    "material_name": resolved,
+                    "quantity": 1.0,
+                    "unit": "ea",
+                    "derivation": {
+                        "gauge_lookup": entry["gauge_lookup"],
+                        "inputs": caller_vars,
+                    },
+                }
+            )
         else:
             # legacy: constant multiplier per unit quantity (per unit length
             # when the rule declares length_m as a driver variable)
             quantity = float(entry)
             if "length_m" in declared and "length_m" in effective:
                 quantity *= float(effective["length_m"])
-            materials.append({
-                "material_name": mat_name,
-                "quantity": quantity,
-                "unit": _infer_unit(mat_name),
-                "derivation": None,
-            })
+            materials.append(
+                {
+                    "material_name": mat_name,
+                    "quantity": quantity,
+                    "unit": _infer_unit(mat_name),
+                    "derivation": None,
+                }
+            )
 
     # Derive labor hours from rule
     inst_hours = rule["labor"].get("installation_hours", 0.0)
@@ -260,6 +268,7 @@ def apply_assembly(
 # ---------------------------------------------------------------------------
 # Fail-closed rule validation (catalog load gate)
 # ---------------------------------------------------------------------------
+
 
 def validate_rule_file(path: Path) -> List[str]:
     """Validate one rule YAML. Returns error strings; empty list = valid.
@@ -279,6 +288,7 @@ def validate_rule_file(path: Path) -> List[str]:
 # Helper: infer unit from material name
 # ---------------------------------------------------------------------------
 
+
 def _infer_unit(mat_name: str) -> str:
     """Infer unit of measure from material name (lowercase keywords)."""
     name_lower = mat_name.lower()
@@ -294,6 +304,7 @@ def _infer_unit(mat_name: str) -> str:
 # ---------------------------------------------------------------------------
 # DB integration: persist assembly + materials to DB
 # ---------------------------------------------------------------------------
+
 
 def persist_assembly_to_db(
     rule_name: str,
@@ -335,11 +346,7 @@ def persist_assembly_to_db(
         # quantities live on BOQ rows (derived per component/route).
         quantity = entry if isinstance(entry, (int, float)) else 1.0
         # Find or create Material record
-        material = (
-            session.query(Material)
-            .filter_by(name=mat_name)
-            .first()
-        )
+        material = session.query(Material).filter_by(name=mat_name).first()
         if material is None:
             material = Material(name=mat_name, unit=_infer_unit(mat_name))
             session.add(material)
@@ -366,11 +373,7 @@ def persist_assembly_to_db(
     hourly_rate = labor.get("hourly_rate")
     if hourly_rate is not None:
         # Try to find or create a labor-rate material
-        labor_mat = (
-            session.query(Material)
-            .filter_by(name="Labor")
-            .first()
-        )
+        labor_mat = session.query(Material).filter_by(name="Labor").first()
         if labor_mat is None:
             labor_mat = Material(name="Labor", unit="hr")
             session.add(labor_mat)

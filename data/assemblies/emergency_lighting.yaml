@@ -1,0 +1,28 @@
+name: emergency_lighting
+rule_version: "1.0.0"
+legend_keywords:
+  - EMERGENCY
+  - EM
+  - EMERGENCY EXIT
+  - EMERGENCY LIGHTING
+  - CENTRAL BATTERY
+  - CB
+  - BATTERY BACKUP
+  - EXIT SIGN
+  - ESCAPE ROUTE
+description: Emergency lighting fixtures with battery backup, including exit signs and maintained/emergency luminaires
+fixture_types:
+  - tag_pattern: "EM[0-9]+"
+    description: Emergency exit signs and luminaires
+  - tag_pattern: "[A-Z][0-9]+CB"
+    description: Central battery connected fixtures
+bom:
+  emergency_fixture: 1.0
+  battery_backup: 1.0
+  wiring: 0.5
+  mounting_bracket: 1.0
+labor:
+  installation_hours: 0.5
+  hourly_rate: 45.00
+  category: electrical
+waste_factor: 0.10

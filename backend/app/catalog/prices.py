@@ -21,8 +21,23 @@ from app.db.models.catalog import Price as PriceModel, LaborRate as LRModel
 
 
 # ---------------------------------------------------------------------------
+# Price cache (request-scoped, invalidated per session)
+# ---------------------------------------------------------------------------
+
+_price_cache: Dict[str, Optional[float]] = {}
+_labor_rate_cache: Dict[str, Optional[float]] = {}
+
+
+def invalidate_price_cache() -> None:
+    """Clear the request-scoped price cache."""
+    _price_cache.clear()
+    _labor_rate_cache.clear()
+
+
+# ---------------------------------------------------------------------------
 # Pure arithmetic functions (zero AI, fully deterministic)
 # ---------------------------------------------------------------------------
+
 
 def material_cost(quantity: float, unit_price: float) -> float:
     """Material cost = quantity * unit_price.
@@ -65,7 +80,13 @@ def latest_labor_rate(db_session: Session, category: str) -> Optional[float]:
     YAML/unpriced instead of failing the run. ONLY that exact condition
     degrades: SQLite surfaces it as ``OperationalError("no such table: …")``
     and any other failure (lock, connection loss, …) propagates loudly.
+
+    Cached: rates don't change during a request.
     """
+    cache_key = category
+    if cache_key in _labor_rate_cache:
+        return _labor_rate_cache[cache_key]
+
     from datetime import date as _date
 
     global _LACKS_LABOR_RATES_TABLE
@@ -80,12 +101,16 @@ def latest_labor_rate(db_session: Session, category: str) -> Optional[float]:
                 "labor_rates table is missing from this database "
                 "(model/migration drift) -- falling back to YAML hourly rates"
             )
+        _labor_rate_cache[cache_key] = None
         return None
     if not rates:
+        _labor_rate_cache[cache_key] = None
         return None
     dated = sorted(rates, key=lambda r: r.effective_from or _date.min, reverse=True)
     hourly = dated[0].hourly_rate
-    return float(hourly) if hourly is not None else None
+    result = float(hourly) if hourly is not None else None
+    _labor_rate_cache[cache_key] = result
+    return result
 
 
 def compute_labor_cost(
@@ -153,6 +178,7 @@ def total_cost(
 # Catalog CRUD — DB-backed, never hardcoded
 # ---------------------------------------------------------------------------
 
+
 def list_materials(db_session: Session) -> List[Dict[str, Any]]:
     """List all materials with their latest unit prices."""
     from sqlalchemy import select
@@ -168,27 +194,39 @@ def list_materials(db_session: Session) -> List[Dict[str, Any]]:
             # Sort by effective_from descending, take first
             sorted_prices = sorted(m.prices, key=lambda p: p.effective_from or "", reverse=True)
             latest_price = sorted_prices[0].unit_price if sorted_prices else None
-        materials.append({
-            "id": str(m.id),
-            "name": m.name,
-            "unit": m.unit,
-            "category": m.category,
-            "latest_unit_price": latest_price,
-        })
+        materials.append(
+            {
+                "id": str(m.id),
+                "name": m.name,
+                "unit": m.unit,
+                "category": m.category,
+                "latest_unit_price": latest_price,
+            }
+        )
     return materials
 
 
 def get_latest_price(db_session: Session, material_name: str) -> Optional[float]:
-    """Get the latest unit price for a material by name."""
+    """Get the latest unit price for a material by name.
+
+    Cached: prices don't change during a request.
+    """
+    cache_key = material_name
+    if cache_key in _price_cache:
+        return _price_cache[cache_key]
+
     from sqlalchemy import select
     from app.db.models.catalog import Material as MatModel
 
     stmt = select(MatModel).where(MatModel.name == material_name)
     mat = db_session.execute(stmt).scalar_one_or_none()
     if mat is None or not mat.prices:
+        _price_cache[cache_key] = None
         return None
     sorted_prices = sorted(mat.prices, key=lambda p: p.effective_from or "", reverse=True)
-    return float(sorted_prices[0].unit_price)
+    price = float(sorted_prices[0].unit_price)
+    _price_cache[cache_key] = price
+    return price
 
 
 def ingest_material_price(
@@ -219,9 +257,7 @@ def ingest_material_price(
     # Create/overwrite Price record
     # Check if an effective_from already exists for this material
     existing_price = (
-        db_session.query(PriceModel)
-        .filter_by(material_id=mat.id, currency=currency)
-        .first()
+        db_session.query(PriceModel).filter_by(material_id=mat.id, currency=currency).first()
     )
 
     if existing_price:
@@ -252,14 +288,16 @@ def list_labor_rates(db_session: Session) -> List[Dict[str, Any]]:
     result = db_session.execute(stmt).scalars().all()
     rates = []
     for r in result:
-        rates.append({
-            "id": str(r.id),
-            "name": r.name,
-            "productivity_rate": float(r.productivity_rate) if r.productivity_rate else None,
-            "hourly_rate": float(r.hourly_rate) if r.hourly_rate else None,
-            "category": r.category,
-            "effective_from": str(r.effective_from) if r.effective_from else None,
-        })
+        rates.append(
+            {
+                "id": str(r.id),
+                "name": r.name,
+                "productivity_rate": float(r.productivity_rate) if r.productivity_rate else None,
+                "hourly_rate": float(r.hourly_rate) if r.hourly_rate else None,
+                "category": r.category,
+                "effective_from": str(r.effective_from) if r.effective_from else None,
+            }
+        )
     return rates
 
 
@@ -301,6 +339,7 @@ def ingest_labor_rate(
 # ---------------------------------------------------------------------------
 # Cost engine with "unpriced" flag (never $0)
 # ---------------------------------------------------------------------------
+
 
 def compute_boq_item(
     quantity: float,

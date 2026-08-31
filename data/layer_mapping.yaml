@@ -14,6 +14,30 @@ layer_mapping:
       - LIGHTING
       - LIGHTING FIXTURES
       - LIGHT
+      - E-LITE
+      - E-LITE-EQPM
+      - E-LITE-EQPM-HDLN
+      - E-LITE-EQPM-IDEN
+      - E-LITE-IDEN
+      - E-LITE-IDEN-PATT
+      - E-LITE-ARRW
+  - assembly: emergency_lighting
+    layers:
+      - E-LITE-EMER-CIRC
+      - E-EMER-IDEN
+      - E-EMER-IDEN-PATT
+  - assembly: dali_lighting_control
+    layers:
+      - daliloop
+      - DALI CONTROL
+      - E-LITE-SWCH-IDEN
+  - assembly: lighting_circuit
+    layers:
+      - E-LITE-CB-CIRC
+      - E-LITE-CIRC
+      - E-LGND-CIRC
+      - E-LGND-ANNO-TEXT
+      - E-POWR-IDEN-TEXT
   - assembly: switch
     layers:
       - SWITCHES
@@ -43,6 +67,14 @@ layer_mapping:
       - NORMAL TRAY
       - CABLE_TRAY
       - CABLE TRAY
+      - E-CABL-TRAY
+      - E-CABLE TRAY
+      - E-TRAY _POWER_
+  - assembly: electrical_equipment
+    layers:
+      - E-ELEC-EQPM
+      - ESEC-ED-EQUIPMENT
+      - E-ELE-QPM-IDEN
   - assembly: conduit
     layers:
       - CONDUIT

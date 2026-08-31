@@ -78,7 +78,7 @@ from app.parsing.layer_map import layer_to_assembly, route_layers
 from app.parsing.text_walker import associate_text, probe_span_ocgs
 from app.assembly.formulas import FormulaValidationError
 from app.assembly.rules import apply_assembly, load_assembly_rule
-from app.catalog.prices import compute_boq_item, compute_labor_cost
+from app.catalog.prices import compute_boq_item, compute_labor_cost, invalidate_price_cache
 from app.common.normalize import source_region
 
 if TYPE_CHECKING:
@@ -182,13 +182,15 @@ def _adapt_spans_for_cascade(raw_text_spans: List[Dict]) -> List[Dict]:
         bbox = span.get("bbox")
         if not bbox or len(bbox) < 4:
             continue
-        adapted.append({
-            "text": span.get("text", ""),
-            "x0": float(bbox[0]),
-            "y0": float(bbox[1]),
-            "x1": float(bbox[2]),
-            "y1": float(bbox[3]),
-        })
+        adapted.append(
+            {
+                "text": span.get("text", ""),
+                "x0": float(bbox[0]),
+                "y0": float(bbox[1]),
+                "x1": float(bbox[2]),
+                "y1": float(bbox[3]),
+            }
+        )
     return adapted
 
 
@@ -207,6 +209,7 @@ def _build_sheet_extraction(
     pdf_path: str,
     data_quality: Dict[str, int] | None = None,
     schedule_blocks: List[Any] | None = None,
+    doc: Optional[Any] = None,
 ) -> SheetExtraction:
     """Build the full SheetExtraction bundle for one sheet.
 
@@ -226,14 +229,13 @@ def _build_sheet_extraction(
         (float(comp.get("x", 0.0)), float(comp.get("y", 0.0))) for comp in components
     ]
     route_polylines = [
-        [(float(x), float(y)) for x, y in (route.get("polyline") or [])]
-        for route in routes
+        [(float(x), float(y)) for x, y in (route.get("polyline") or [])] for route in routes
     ]
     annotations = associate_text(
         cascade_spans,
         component_centroids,
         route_polylines,
-        ocg_by_span=_span_ocg_map(pdf_path, raw_text_spans),
+        ocg_by_span=_span_ocg_map(pdf_path, raw_text_spans, doc=doc),
     )
 
     return SheetExtraction(
@@ -255,9 +257,7 @@ def _build_sheet_extraction(
                 confidence_score=float(route.get("confidence_score", 1.0)),
                 size_json=route_sizes[index],
                 page=int(route.get("page") or 0),
-                bbox=(
-                    source_region(route.get("page"), route.get("bbox")) or {}
-                ).get("bbox"),
+                bbox=(source_region(route.get("page"), route.get("bbox")) or {}).get("bbox"),
             )
             for index, route in enumerate(routes)
         ],
@@ -275,9 +275,7 @@ def _build_sheet_extraction(
                 confidence_score=float(comp.get("confidence_score", 1.0)),
                 source_path_ids=list(comp.get("source_path_ids", [])),
                 page=int(comp.get("page") or 0),
-                bbox=(
-                    source_region(comp.get("page"), comp.get("bbox")) or {}
-                ).get("bbox"),
+                bbox=(source_region(comp.get("page"), comp.get("bbox")) or {}).get("bbox"),
             )
             for comp in components
         ],
@@ -286,16 +284,26 @@ def _build_sheet_extraction(
     )
 
 
-def _span_ocg_map(pdf_path: str, raw_text_spans: List[Dict]) -> dict[int, str]:
+def _span_ocg_map(
+    pdf_path: str,
+    raw_text_spans: List[Dict],
+    doc: Optional[Any] = None,
+) -> dict[int, str]:
     """Span-index → OCG name aligned with extract_text_spans' flat order.
 
     ``probe_span_ocgs`` indexes spans per page; raw spans are flattened across
     pages in page order, so each page's probe result is shifted by the count
     of preceding pages' spans. Degrades to {} on any engine that does not
     expose per-span OCG membership.
+
+    If ``doc`` is provided (pre-opened pymupdf.Document), reuse it instead of
+    re-opening the file. The caller is responsible for closing the document.
     """
+    owns_doc = False
     try:
-        doc = pymupdf.open(pdf_path)
+        if doc is None:
+            doc = pymupdf.open(pdf_path)
+            owns_doc = True
     except Exception:
         return {}
     try:
@@ -314,7 +322,8 @@ def _span_ocg_map(pdf_path: str, raw_text_spans: List[Dict]) -> dict[int, str]:
     except Exception:
         return {}
     finally:
-        doc.close()
+        if owns_doc:
+            doc.close()
 
 
 def _unmapped_layer_clusters(
@@ -327,12 +336,27 @@ def _unmapped_layer_clusters(
     Clusters at the same resolved-scale threshold parse_pdf clusters mapped
     layers with (no legend-derived mm threshold exists yet), so unmapped
     clustering stays consistent with the mapped pipeline (spec v3 §7.4/§7.9).
+
+    PERFORMANCE: Only cluster layers that actually have paths in the PDF,
+    and skip layers with excessive paths (likely architectural patterns,
+    not discrete symbols).
     """
     threshold_px = derive_threshold_px(None, denominator)
     max_symbol_diagonal_px = threshold_px * SYMBOL_CUTOFF_FACTOR
+
+    # Count paths per layer
+    from collections import Counter
+    layer_path_counts = Counter(d.get("layer") for d in raw_drawings if d.get("layer"))
+
+    # Skip layers with > 1000 paths (architectural patterns, hatches, etc.)
+    MAX_PATHS_FOR_UNMAPPED_CLUSTERING = 1000
+
     clusters: List[Dict] = []
     for layer_name in ocg_registry or {}:
         if layer_to_assembly(layer_name) is not None:
+            continue
+        count = layer_path_counts.get(layer_name, 0)
+        if count == 0 or count > MAX_PATHS_FOR_UNMAPPED_CLUSTERING:
             continue
         clusters.extend(
             cluster_paths_threshold(
@@ -372,10 +396,22 @@ def _route_layer_clusters(raw_drawings: List[Dict], scale: Any) -> List[Dict]:
     ``max_symbol_diagonal_px=None`` so ribbon/closed-loop route geometry is
     reachable; symbol clustering and its certified count baselines are
     untouched.
+
+    PERFORMANCE: Only cluster route layers that actually have paths in the PDF.
     """
     threshold_px = derive_threshold_px(None, parse_scale_denominator(str(scale or ""))[0])
+
+    # Find which route layers actually have paths in the PDF
+    pdf_layers: set[str] = set()
+    for d in raw_drawings:
+        layer = d.get("layer")
+        if layer:
+            pdf_layers.add(layer)
+
     clusters: List[Dict] = []
     for layer_name in route_layers():
+        if layer_name not in pdf_layers:
+            continue
         clusters.extend(
             cluster_paths_threshold(
                 raw_drawings,
@@ -454,7 +490,10 @@ def resolve_route_context(
         return None
     size_source = size.get("source")
     required_size_vars = set(mech_rule.get("variables") or []) - {
-        "length_m", "max_mm", "elbows_90", "tees",
+        "length_m",
+        "max_mm",
+        "elbows_90",
+        "tees",
     }
     if any(var not in size for var in required_size_vars):
         size_source = "assumed"
@@ -501,8 +540,7 @@ def resolve_route_context(
     summary="Run the full E2E vector pipeline on an uploaded PDF",
 )
 def e2e_run(
-    file: UploadFile = File(...,
-        description="PDF file to process (vector preferred)."),
+    file: UploadFile = File(..., description="PDF file to process (vector preferred)."),
     persist: bool = False,
     project_id: uuid.UUID | None = None,
 ) -> Dict[str, Any]:
@@ -513,23 +551,25 @@ def e2e_run(
     project) and the response gains an ``estimate_id``.
     """
 
+    logger.info("POST /api/e2e/run reached — file=%s persist=%s", file.filename, persist)
     # Save the uploaded PDF to a temporary file so that the path‑based
     # helpers (classify_upload, parse_pdf) can receive a real file path.
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(file.file.read())
         tmp_path = tmp.name
 
+    pdf_doc = None
     try:
         dq = DataQuality()
+        # Clear price cache for this request
+        invalidate_price_cache()
 
         # 1️⃣ Classify
         try:
             classify_result = classify_upload(tmp_path)
         except Exception:
             dq.classifier_errors += 1
-            logger.exception(
-                "classify_upload failed; degrading upload to the raster path"
-            )
+            logger.exception("classify_upload failed; degrading upload to the raster path")
             classify_result = {"status": "raster"}
 
         if classify_result.get("status") != "vector":
@@ -556,6 +596,12 @@ def e2e_run(
         raw_drawings = parsed.get("raw_drawings", [])
         cascade_spans = _adapt_spans_for_cascade(parsed.get("raw_text_spans", []))
         schedule_rows = detect_schedule_rows(cascade_spans)
+
+        # Open document once for OCG probing (avoids re-opening 3x)
+        try:
+            pdf_doc = pymupdf.open(tmp_path)
+        except Exception:
+            pdf_doc = None
 
         # 3️⃣ Measure routes (length-based assemblies: tray, conduit, ducts, pipes)
         route_layer_names = tuple(route_layers())
@@ -622,9 +668,16 @@ def e2e_run(
                 if assembly_type in SIZED_ASSEMBLIES:
                     fu_stats: Dict[str, int] = {}
                     ctx = resolve_route_context(
-                        assembly_type, route, cascade_spans, scale,
-                        schedule_rows, extraction_components, routes,
-                        route_index, settings=get_settings(), stats=fu_stats,
+                        assembly_type,
+                        route,
+                        cascade_spans,
+                        scale,
+                        schedule_rows,
+                        extraction_components,
+                        routes,
+                        route_index,
+                        settings=get_settings(),
+                        stats=fu_stats,
                     )
                     dq.fu_corridor_excluded += fu_stats.get("fu_corridor_excluded", 0)
                     if ctx is None:
@@ -632,7 +685,8 @@ def e2e_run(
                         logger.warning(
                             "dropping %s route (%.3f m): no resolvable "
                             "cross-section size and no configured default",
-                            assembly_type, route["length_m"],
+                            assembly_type,
+                            route["length_m"],
                         )
                         continue
                     variables, size_source, resolved_size = ctx
@@ -661,9 +715,7 @@ def e2e_run(
                     # rules with bound variables already scale their constant
                     # lines by length_m inside rules.py — scaling again would
                     # square every fitting length (0.2 * L^2).
-                    if variables is None and "formula" not in (
-                        mat.get("derivation") or {}
-                    ):
+                    if variables is None and "formula" not in (mat.get("derivation") or {}):
                         quantity *= route["length_m"]
                     boq_items.append(
                         _boq_line(
@@ -678,9 +730,7 @@ def e2e_run(
                             size_source=size_source,
                             rule_version=applied.get("rule_version"),
                             scale_assumed=(scale_status == "assumed"),
-                            source=source_region(
-                                route.get("page"), route.get("bbox")
-                            ),
+                            source=source_region(route.get("page"), route.get("bbox")),
                         )
                     )
                 # One extra BOQ line per rule-with-labor (spec v3 §7.14) —
@@ -704,9 +754,7 @@ def e2e_run(
                             size_source=size_source,
                             rule_version=applied.get("rule_version"),
                             scale_assumed=(scale_status == "assumed"),
-                            source=source_region(
-                                route.get("page"), route.get("bbox")
-                            ),
+                            source=source_region(route.get("page"), route.get("bbox")),
                             labor_payload=labor_payload,
                         )
                     )
@@ -736,8 +784,7 @@ def e2e_run(
                 except FormulaValidationError as exc:
                     dq.dropped_symbols += 1
                     logger.warning(
-                        "dropping %s symbols (count path): assembly rule "
-                        "failed (%s)",
+                        "dropping %s symbols (count path): assembly rule failed (%s)",
                         resolved_type,
                         exc,
                     )
@@ -756,9 +803,7 @@ def e2e_run(
                             derivation=mat.get("derivation"),
                             size_source=None,
                             rule_version=rule.get("rule_version"),
-                            source=source_region(
-                                comp.get("page"), comp.get("bbox")
-                            ),
+                            source=source_region(comp.get("page"), comp.get("bbox")),
                         )
                     )
                 # One extra labor line per counted instance, scaled by the
@@ -779,9 +824,7 @@ def e2e_run(
                             source_quality=source_quality,
                             size_source=None,
                             rule_version=rule.get("rule_version"),
-                            source=source_region(
-                                comp.get("page"), comp.get("bbox")
-                            ),
+                            source=source_region(comp.get("page"), comp.get("bbox")),
                             labor_payload=labor_payload,
                         )
                     )
@@ -807,6 +850,7 @@ def e2e_run(
             pdf_path=tmp_path,
             data_quality=dq.as_dict(),
             schedule_blocks=schedule_blocks,
+            doc=pdf_doc,
         )
 
         # Optional persistence (default-off): write the full extraction
@@ -840,7 +884,12 @@ def e2e_run(
         return response
 
     finally:
-        # Clean up the temporary PDF file – runs even if we returned early.
+        # Clean up the temporary PDF file and document handle
+        if pdf_doc is not None:
+            try:
+                pdf_doc.close()
+            except Exception:
+                pass
         try:
             os.unlink(tmp_path)
         except OSError:

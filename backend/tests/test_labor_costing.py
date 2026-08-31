@@ -33,11 +33,22 @@ from app.db.models.estimate import BoqItem
 from app.db.session import get_engine
 
 
+@pytest.fixture(autouse=True)
+def _clear_labor_rate_cache():
+    """Clear the module-level _labor_rate_cache before every test."""
+    from app.catalog.prices import invalidate_price_cache
+    invalidate_price_cache()
+    yield
+    invalidate_price_cache()
+
+
 # ---------------------------------------------------------------------------
 # Unit fixtures: in-memory catalog DB
 # ---------------------------------------------------------------------------
 @pytest.fixture()
 def catalog_session():
+    from app.catalog.prices import invalidate_price_cache
+    invalidate_price_cache()
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
