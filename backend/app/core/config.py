@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     )
 
     app_env: str = "development"
-    database_url: str = "sqlite:///./aec.db"
+    database_url: str  # Required — set DATABASE_URL in .env (Supabase PostgreSQL)
     cors_origins: list[str] = ["http://localhost:3000", "https://aec-blueprint-intelligence.vercel.app"]
     log_level: str = "INFO"
 
