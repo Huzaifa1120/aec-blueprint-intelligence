@@ -8,7 +8,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as OrmSession
 
-from app.db.models.estimate import BoqItem
+from app.db.models.estimate import BoqItem, Estimate
+from app.db.models.project import Project
 from app.db.models.review import ReviewAction, ReviewSession, utcnow
 from app.db.session import get_engine
 
@@ -19,6 +20,7 @@ metrics_router = APIRouter(tags=["review"])
 class CreateSessionRequest(BaseModel):
     sheet_label: str
     project_id: str | None = None
+    estimate_id: str | None = None
 
 
 class AddActionRequest(BaseModel):
@@ -35,6 +37,33 @@ def _parse_uuid(value: str) -> _uuid.UUID:
         return _uuid.UUID(value)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid id")
+
+
+def _resolve_session_project(db: OrmSession, payload: CreateSessionRequest) -> _uuid.UUID | None:
+    if payload.estimate_id and payload.project_id:
+        eid = _parse_uuid(payload.estimate_id)
+        pid = _parse_uuid(payload.project_id)
+        estimate = db.get(Estimate, eid)
+        if estimate is None:
+            raise HTTPException(status_code=404, detail="Estimate not found")
+        if estimate.project_id != pid:
+            raise HTTPException(
+                status_code=400,
+                detail="estimate_id and project_id refer to different projects",
+            )
+        return pid
+    if payload.estimate_id:
+        eid = _parse_uuid(payload.estimate_id)
+        estimate = db.get(Estimate, eid)
+        if estimate is None:
+            raise HTTPException(status_code=404, detail="Estimate not found")
+        return estimate.project_id
+    if payload.project_id:
+        pid = _parse_uuid(payload.project_id)
+        if db.get(Project, pid) is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return pid
+    return None
 
 
 def compute_metrics(engine, project_id: _uuid.UUID | None = None) -> dict:
@@ -68,8 +97,8 @@ def compute_metrics(engine, project_id: _uuid.UUID | None = None) -> dict:
 
 @router.post("/sessions")
 def create_session(payload: CreateSessionRequest) -> dict:
-    project_id = _parse_uuid(payload.project_id) if payload.project_id else None
     with OrmSession(get_engine()) as db:
+        project_id = _resolve_session_project(db, payload)
         session = ReviewSession(sheet_label=payload.sheet_label, project_id=project_id)
         db.add(session)
         db.commit()
