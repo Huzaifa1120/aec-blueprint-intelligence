@@ -1,0 +1,131 @@
+{
+  "part": "Part-1",
+  "loops": [
+    {
+      "loop": "DALI LOOP-03",
+      "text_quantity": 36,
+      "spatial_count": 36,
+      "cb_count": 18,
+      "em_count": 17,
+      "emem_count": 1,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    },
+    {
+      "loop": "DALI LOOP-4",
+      "text_quantity": 37,
+      "spatial_count": 37,
+      "cb_count": 18,
+      "em_count": 18,
+      "emem_count": 1,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    },
+    {
+      "loop": "DALI LOOP-08",
+      "text_quantity": 34,
+      "spatial_count": 34,
+      "cb_count": 17,
+      "em_count": 16,
+      "emem_count": 1,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    },
+    {
+      "loop": "DALI LOOP-9",
+      "text_quantity": 33,
+      "spatial_count": 33,
+      "cb_count": 17,
+      "em_count": 16,
+      "emem_count": 0,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    },
+    {
+      "loop": "DALI LOOP-10",
+      "text_quantity": 28,
+      "spatial_count": 28,
+      "cb_count": 14,
+      "em_count": 14,
+      "emem_count": 0,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    },
+    {
+      "loop": "DALI LOOP-11",
+      "text_quantity": 28,
+      "spatial_count": 28,
+      "cb_count": 14,
+      "em_count": 14,
+      "emem_count": 0,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    },
+    {
+      "loop": "DALI LOOP-12",
+      "text_quantity": 28,
+      "spatial_count": 28,
+      "cb_count": 14,
+      "em_count": 14,
+      "emem_count": 0,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    },
+    {
+      "loop": "DALI LOOP-13",
+      "text_quantity": 37,
+      "spatial_count": 37,
+      "cb_count": 18,
+      "em_count": 18,
+      "emem_count": 1,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    },
+    {
+      "loop": "DALI LOOP-14",
+      "text_quantity": 16,
+      "spatial_count": 16,
+      "cb_count": 8,
+      "em_count": 8,
+      "emem_count": 0,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    },
+    {
+      "loop": "DALI LOOP-15",
+      "text_quantity": 16,
+      "spatial_count": 16,
+      "cb_count": 8,
+      "em_count": 8,
+      "emem_count": 0,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    }
+  ],
+  "totals": {
+    "CB": 146,
+    "EM": 143,
+    "EMEM": 4,
+    "NORMAL": 0,
+    "TEXT_TOTAL": 293,
+    "SPATIAL_TOTAL": 293
+  },
+  "confidence_summary": {
+    "min": 1.0,
+    "max": 1.0,
+    "avg": 1.0
+  },
+  "flags": [
+    "DUPLICATE_LOOP_MERGED: LCP-L2/01 PART-1 DALI LOOP-12 quantities=[26, 28] chosen=28"
+  ]
+}

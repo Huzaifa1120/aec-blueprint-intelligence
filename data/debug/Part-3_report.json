@@ -1,0 +1,63 @@
+{
+  "part": "Part-3",
+  "loops": [
+    {
+      "loop": "DALI LOOP-01",
+      "text_quantity": 43,
+      "spatial_count": 43,
+      "cb_count": 25,
+      "em_count": 18,
+      "emem_count": 0,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    },
+    {
+      "loop": "DALI LOOP-02",
+      "text_quantity": 25,
+      "spatial_count": 25,
+      "cb_count": 15,
+      "em_count": 10,
+      "emem_count": 0,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    },
+    {
+      "loop": "DALI LOOP-03",
+      "text_quantity": 26,
+      "spatial_count": 26,
+      "cb_count": 15,
+      "em_count": 11,
+      "emem_count": 0,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    },
+    {
+      "loop": "DALI LOOP-04",
+      "text_quantity": 22,
+      "spatial_count": 22,
+      "cb_count": 13,
+      "em_count": 9,
+      "emem_count": 0,
+      "normal_count": 0,
+      "delta": 0,
+      "confidence": 1.0
+    }
+  ],
+  "totals": {
+    "CB": 68,
+    "EM": 48,
+    "EMEM": 0,
+    "NORMAL": 0,
+    "TEXT_TOTAL": 116,
+    "SPATIAL_TOTAL": 116
+  },
+  "confidence_summary": {
+    "min": 1.0,
+    "max": 1.0,
+    "avg": 1.0
+  },
+  "flags": []
+}
