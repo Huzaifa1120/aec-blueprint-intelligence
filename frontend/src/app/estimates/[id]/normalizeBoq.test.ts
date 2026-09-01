@@ -118,6 +118,21 @@ describe("useReviewSession payload shape", () => {
     apiPostMock.mockResolvedValue({ session_id: "s1" })
   })
 
+  it("sends estimate_id (not project_id) when creating a session", async () => {
+    const wrapper = makeWrapper()
+    renderHook(() => useReviewSession("est-1"), { wrapper })
+
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalled())
+
+    const [path, payload] = apiPostMock.mock.calls[0]
+    expect(path).toBe("/api/review/sessions")
+    expect(payload).toEqual({
+      sheet_label: "estimate:est-1",
+      estimate_id: "est-1",
+    })
+    expect(payload).not.toHaveProperty("project_id")
+  })
+
   it("forwards boq_item_id, reason and corrected_value on correction actions", async () => {
     const wrapper = makeWrapper()
     const { result } = renderHook(() => useReviewSession("est-1"), { wrapper })

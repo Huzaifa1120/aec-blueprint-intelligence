@@ -48,7 +48,7 @@ export function useReviewSession(estimateId: string | undefined) {
     mutationFn: () =>
       apiPost<SessionResponse>("/api/review/sessions", {
         sheet_label: estimateId ? `estimate:${estimateId}` : "workspace",
-        project_id: estimateId ?? null,
+        estimate_id: estimateId ?? null,
       }),
     onSuccess: (data) => setSessionId(data.session_id ?? data.id ?? null),
   })
