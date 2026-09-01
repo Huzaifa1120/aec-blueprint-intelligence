@@ -6,8 +6,8 @@ All PDFs in this folder are **gitignored** (`data/samples/*.pdf`) — client-sup
 material that stays local. Only this `README.md` is committed. If the folder is
 empty on a fresh clone, obtain copies from the project owner.
 The fixture `MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf` was restored 2026-08-22;
-the full suite (63 tests) runs green with it present. All 5 PDFs verified
-present locally 2026-08-23.
+the full suite (63 tests) runs green with it present. All 9 PDFs verified
+present locally 2026-09-01.
 
 ## Files
 
@@ -18,6 +18,10 @@ present locally 2026-08-23.
 | `ABC-SC05-S202.pdf` | ~391 KB | 1 | ARCH D (2592×1728 pt) | Structural sheet S202 — section details |
 | `Addendum3.pdf` | ~1.4 MB | 7 | Mixed: p0 letter portrait (612×792 pt); pp1–6 oversized landscape (3024×2160 pt) | Contract addendum: cover text page + 6 drawing-exhibit pages (7k–13k ops each, embedded images) — out-of-domain / non-takeoff upload test |
 | `ex2-hwy-lighting-plan.pdf` | ~73 KB | 1 | Tabloid landscape (1224×792 pt) | Highway lighting plan |
+| `P0050-AMC-C-V2-GM-FA-115-01-R0(Fire Alarm System, MF)-GENERAL PLAN.pdf` | ~6.5 MB | 1 | E-size landscape (3370×2384 pt) | Fire alarm general plan — large vector sheet with device symbols, zones, and notes |
+| `P0050-AMC-A-E2-2F-EL-122-02-B, Lighting Layout, 2nd Floor, Part-1.pdf` | ~1.5 MB | 1 | E-size landscape (3370×2384 pt) | Lighting layout 2nd floor part 1 — fixture schedule, circuiting, and lighting control |
+| `P0050-AMC-A-E2-2F-EL-123-03-B, Lighting Layout, 2nd Floor, Part-2.pdf` | ~1.4 MB | 1 | E-size landscape (3370×2384 pt) | Lighting layout 2nd floor part 2 — continuation of fixture layout and controls |
+| `P0050-AMC-A-E2-2F-EL-123-04-B, Lighting Layout, 2nd Floor, Part-3.pdf` | ~1.2 MB | 1 | E-size landscape (3370×2384 pt) | Lighting layout 2nd floor part 3 — completion of floor lighting plan |
 
 ## Details
 
@@ -48,3 +52,9 @@ present locally 2026-08-23.
   (~5.8k drawing ops, zero images, zero OCGs); almost no extractable text
   (6 chars — text appears outlined to curves) — exercises the no-text /
   legend-matching path.
+- **`P0050-AMC-C-V2-GM-FA-115-01-R0(Fire Alarm System, MF)-GENERAL PLAN.pdf`** — Fire alarm system general plan. Large E-size sheet (~6.5 MB, 1 page, 3370×2384 pt). Vector-heavy with device symbols, zone labeling, and notes. Tests large-file handling and symbol detection in fire alarm discipline.
+- **`P0050-AMC-A-E2-2F-EL-122-02-B, Lighting Layout, 2nd Floor, Part-1.pdf`** — Electrical lighting layout for 2nd floor, part 1 of 3. E-size (3370×2384 pt), ~1.5 MB. Contains fixture schedule, circuiting, and lighting control devices. Layer-rich vector with extractable text. Part of a 3-sheet lighting set.
+- **`P0050-AMC-A-E2-2F-EL-123-03-B, Lighting Layout, 2nd Floor, Part-2.pdf`** — Electrical lighting layout for 2nd floor, part 2 of 3. E-size (3370×2384 pt), ~1.4 MB. Continuation of fixture layout and controls. Same project/discipline as part 1.
+- **`P0050-AMC-A-E2-2F-EL-123-04-B, Lighting Layout, 2nd Floor, Part-3.pdf`** — Electrical lighting layout for 2nd floor, part 3 of 3. E-size (3370×2384 pt), ~1.2 MB. Completion of the floor lighting plan. Together the three parts form a complete 2nd floor lighting takeoff set.
+
+(End of file)

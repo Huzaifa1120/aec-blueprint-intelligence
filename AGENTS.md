@@ -59,6 +59,7 @@ Frontend calls the backend at `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8
 
 ## Gotchas
 
+- **Database:** Runtime uses **Supabase PostgreSQL only** — copy `backend/.env.example` → `backend/.env` and set `DATABASE_URL` from Supabase → Project Settings → Database. No local `aec.db`; `*.db` is gitignored. Pytest uses ephemeral in-memory SQLite (`tests/conftest.py`) and never hits Supabase.
 - **Pre-commit quality gate:** `.githooks/pre-commit` runs ruff (staged `.py`) and eslint+tsc+prettier (staged frontend code). It is NOT active on fresh clones — enable once with `git config core.hooksPath .githooks`.
 - Single git repo at the root (initialized 2026-08-19); `frontend/.git` was removed so backend + frontend + docs share one history.
 - All 5 sample PDFs are present locally; the suite runs green (63 tests). On a fresh clone `data/samples/*.pdf` is gitignored — obtain copies from the project owner. No dedicated HVAC/duct sheet exists yet (Phase 3 gap).
