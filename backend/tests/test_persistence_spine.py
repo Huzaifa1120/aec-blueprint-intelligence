@@ -7,9 +7,9 @@ Covers plan Task 2 acceptance:
 (d) tampering with a stored formula derivation flips replay to 409;
 (e) unpriced items keep their ``unpriced`` flag through the round trip.
 
-The tests exercise the real dev database (sqlite aec.db) exactly as the
-plan specifies: ``OrmSession(get_engine())`` for writes, TestClient against
-the estimates router for reads. Idempotent replace semantics keep repeat
+The tests use an ephemeral in-memory SQLite database (see ``tests/conftest.py``)
+so the suite stays hermetic and never touches Supabase. Writes use
+``OrmSession(get_engine())``; reads use TestClient against the estimates router. Idempotent replace semantics keep repeat
 runs stable.
 """
 

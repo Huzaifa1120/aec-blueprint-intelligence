@@ -2,7 +2,7 @@ from app.core.config import Settings, get_settings
 
 # The .env file may override defaults in CI/local; use explicit kwarg for defaults test
 def _default_database_url() -> str:
-    return "sqlite:///./aec.db"
+    return "postgresql://postgres:secret@localhost:5432/postgres"
 
 
 def test_defaults() -> None:
@@ -10,7 +10,7 @@ def test_defaults() -> None:
         database_url=_default_database_url(),
     )
     assert s.app_env == "development"
-    assert s.database_url == "sqlite:///./aec.db"
+    assert s.database_url == _default_database_url()
     assert s.cors_origins == [
         "http://localhost:3000",
         "https://aec-blueprint-intelligence.vercel.app",

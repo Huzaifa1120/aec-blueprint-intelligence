@@ -120,3 +120,87 @@ def test_review_endpoints_happy_path(tmp_path, monkeypatch):
         == 400
     )
     assert client.get("/api/projects/nope/review-metrics").status_code == 400
+
+
+def _review_test_client(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+
+    from app.db.base import Base
+    from app.main import app
+
+    engine = create_engine(f"sqlite:///{(tmp_path / 'review-estimate.db').as_posix()}")
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr("app.review.router.get_engine", lambda: engine)
+    return TestClient(app), engine
+
+
+def test_create_session_with_estimate_id_resolves_project(tmp_path, monkeypatch):
+    from uuid import UUID
+
+    from sqlalchemy.orm import Session as OrmSession
+
+    from app.db.models.estimate import Estimate
+    from app.db.models.project import Project
+    from app.db.models.review import ReviewSession
+
+    client, engine = _review_test_client(tmp_path, monkeypatch)
+
+    with OrmSession(engine) as db:
+        project = Project(name="estimate-review")
+        db.add(project)
+        db.flush()
+        estimate = Estimate(project_id=project.id)
+        db.add(estimate)
+        db.commit()
+        pid = project.id
+        eid = str(estimate.id)
+
+    created = client.post(
+        "/api/review/sessions",
+        json={"sheet_label": f"estimate:{eid}", "estimate_id": eid},
+    )
+    assert created.status_code == 200, created.text
+
+    with OrmSession(engine) as db:
+        session = db.get(ReviewSession, UUID(created.json()["session_id"]))
+        assert session is not None
+        assert session.project_id == pid
+
+
+def test_create_session_unknown_estimate_returns_404(tmp_path, monkeypatch):
+    from uuid import uuid4
+
+    client, _ = _review_test_client(tmp_path, monkeypatch)
+
+    response = client.post(
+        "/api/review/sessions",
+        json={"sheet_label": "estimate:missing", "estimate_id": str(uuid4())},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Estimate not found"
+
+
+def test_create_session_estimate_id_as_project_id_fails_cleanly(tmp_path, monkeypatch):
+    from sqlalchemy.orm import Session as OrmSession
+
+    from app.db.models.estimate import Estimate
+    from app.db.models.project import Project
+
+    client, engine = _review_test_client(tmp_path, monkeypatch)
+
+    with OrmSession(engine) as db:
+        project = Project(name="old-bug-path")
+        db.add(project)
+        db.flush()
+        estimate = Estimate(project_id=project.id)
+        db.add(estimate)
+        db.commit()
+        eid = str(estimate.id)
+
+    response = client.post(
+        "/api/review/sessions",
+        json={"sheet_label": f"estimate:{eid}", "project_id": eid},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found"
