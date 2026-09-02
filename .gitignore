@@ -15,3 +15,12 @@ backend/data/uploads/
 backend/tests/fixtures/out/
 pytest_output.txt
 run_script.py
+
+# Debug/development scripts
+backend/check_*.py
+backend/debug_*.py
+backend/validate_*.py
+backend/test_enrichment.py
+backend/test_full_pipeline.py
+backend/test_v3.py
+test_api.py
