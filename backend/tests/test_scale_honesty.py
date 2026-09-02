@@ -1,8 +1,19 @@
 """Scale honesty end-to-end (spec v3 §7.4): unparseable scale == missing →
 1:100 assumed, never 1:1; the e2e response carries an explicit scale block."""
 
+import pytest
+from fastapi.testclient import TestClient
+
+from app.main import app
 from app.parsing.routes import compute_length_meters
 from app.parsing.scale import resolve_scale
+from tests._e2e_async import post_and_wait
+
+
+@pytest.fixture(scope="module")
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def test_unparseable_scale_no_longer_means_1_to_1():
@@ -16,11 +27,8 @@ def test_resolver_flags_missing_scale_for_pipeline():
     assert resolve_scale([]).status == "assumed"
 
 
-def test_run_response_carries_scale_block(monkeypatch):
-    from fastapi.testclient import TestClient
-
+def test_run_response_carries_scale_block(client, monkeypatch, tmp_path):
     import app.e2e.router as er
-    from app.main import app
 
     class FakeParsed(dict):
         pass
@@ -39,12 +47,10 @@ def test_run_response_carries_scale_block(monkeypatch):
     )
     monkeypatch.setattr(er, "parse_pdf", lambda p: fake)
 
-    client = TestClient(app)
-    resp = client.post(
-        "/api/e2e/run",
-        files={"file": ("t.pdf", b"%PDF-1.4 fake", "application/pdf")},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["scale"]["status"] == "assumed"
-    assert body["scale"]["value"] == "1:100"
+    # Create a dummy PDF file
+    dummy_pdf = tmp_path / "dummy.pdf"
+    dummy_pdf.write_bytes(b"%PDF-1.4 fake")
+    body = post_and_wait(client, str(dummy_pdf), persist=False)
+    result = body["result"]
+    assert result["scale"]["status"] == "assumed"
+    assert result["scale"]["value"] == "1:100"

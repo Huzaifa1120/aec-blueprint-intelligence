@@ -23,6 +23,7 @@ class LightingBoqRow:
     spec_code: str = "unknown"
     loop_id: Optional[str] = None
     quantity: int = 0
+    unit: str = "each"
     unit_price: Optional[float] = None  # Always None — no catalog hardcode
     total_cost: Optional[float] = None
     unpriced: bool = True

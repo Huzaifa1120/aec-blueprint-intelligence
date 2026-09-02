@@ -174,18 +174,13 @@ def client():
 def hvac_run(client, tmp_path_factory):
     """Distinct sheet name so this module never collides with other suites."""
     from tests.fixtures.make_hvac_fixture import build_hvac_fixture
+    from tests._e2e_async import post_and_wait
 
     pdf_dir = tmp_path_factory.mktemp("labor_costing")
     pdf_path = str(pdf_dir / "labor_costing_hvac.pdf")
     build_hvac_fixture(pdf_path)
-    with open(pdf_path, "rb") as f:
-        response = client.post(
-            "/api/e2e/run",
-            files={"file": ("labor_costing_hvac.pdf", f, "application/pdf")},
-            params={"persist": True},
-        )
-    assert response.status_code == 200, response.text
-    return response.json()
+    body = post_and_wait(client, pdf_path, persist=True)
+    return body["result"]
 
 
 def _labor_lines(lines):

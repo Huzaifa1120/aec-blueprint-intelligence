@@ -35,7 +35,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.main import app
 from app.e2e.extraction import ComponentRow, LayerRow, SheetExtraction, ScheduleBlockRow
+
+
+@pytest.fixture(scope="module")
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
 
 SAMPLE = (
     Path(__file__).resolve().parents[2]
@@ -202,11 +209,11 @@ def test_schedule_blocks_are_not_legends_for_gating():
 
 
 @pytest.fixture()
-def mmc_body(tmp_path, monkeypatch):
+def mmc_body(client, tmp_path, monkeypatch):
     from sqlalchemy import create_engine
 
     from app.db.base import Base
-    from app.main import app
+    from tests._e2e_async import post_and_wait
 
     db_path = tmp_path / "test_gating_api.db"
     engine = create_engine(f"sqlite:///{db_path}")
@@ -216,13 +223,8 @@ def mmc_body(tmp_path, monkeypatch):
         "app.e2e.router.get_engine",
         lambda: create_engine(f"sqlite:///{db_path}"),
     )
-    with open(SAMPLE, "rb") as fh:
-        resp = TestClient(app).post(
-            "/api/e2e/run",
-            files={"file": ("sample.pdf", fh, "application/pdf")},
-        )
-    assert resp.status_code == 200, resp.text
-    return resp.json()
+    body = post_and_wait(client, str(SAMPLE), persist=False)
+    return body["result"]
 
 
 def test_mmc_boq_contains_no_lighting_items(mmc_body):

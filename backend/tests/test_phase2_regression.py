@@ -443,6 +443,7 @@ def test_e2e_pipeline_endpoint_on_sample(tmp_path, monkeypatch):
     from sqlalchemy import create_engine
 
     from app.db.base import Base
+    from tests._e2e_async import post_and_wait
 
     sample = (
         Path(__file__).resolve().parents[2]
@@ -461,18 +462,13 @@ def test_e2e_pipeline_endpoint_on_sample(tmp_path, monkeypatch):
         lambda: create_engine(f"sqlite:///{db_path}"),
     )
 
-    with open(sample, "rb") as fh:
-        resp = client.post(
-            "/api/e2e/run",
-            files={"file": ("sample.pdf", fh, "application/pdf")},
-        )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["status"] == "ok", f"Pipeline failed: {body}"
-    assert body["components_found"] > 0, "Expected discrete components on the sheet"
-    assert len(body["boq_items"]) > 0, "Expected BOQ items from the pipeline"
+    body = post_and_wait(client, str(sample), persist=False)
+    result = body["result"]
+    assert result["status"] == "ok", f"Pipeline failed: {result}"
+    assert result["components_found"] > 0, "Expected discrete components on the sheet"
+    assert len(result["boq_items"]) > 0, "Expected BOQ items from the pipeline"
 
-    for item in body["boq_items"]:
+    for item in result["boq_items"]:
         assert item["confidence_status"] in ("MEASURED", "DERIVED", "ASSUMED"), (
             "Every BOQ item must have a discrete confidence tier"
         )
@@ -495,6 +491,7 @@ def test_ep3_e2e_pipeline_validation_on_sample(tmp_path, monkeypatch):
     from sqlalchemy import create_engine
 
     from app.db.base import Base
+    from tests._e2e_async import post_and_wait
 
     sample = (
         Path(__file__).resolve().parents[2]
@@ -514,13 +511,8 @@ def test_ep3_e2e_pipeline_validation_on_sample(tmp_path, monkeypatch):
     )
 
     def run_pipeline():
-        with open(sample, "rb") as fh:
-            resp = client.post(
-                "/api/e2e/run",
-                files={"file": ("sample.pdf", fh, "application/pdf")},
-            )
-        assert resp.status_code == 200, resp.text
-        return resp.json()
+        body = post_and_wait(client, str(sample), persist=False)
+        return body["result"]
 
     body = run_pipeline()
 

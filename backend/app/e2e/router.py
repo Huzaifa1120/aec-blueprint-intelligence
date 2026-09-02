@@ -57,6 +57,7 @@ from app.assembly.formulas import FormulaValidationError
 from app.assembly.rules import apply_assembly, load_assembly_rule
 from app.catalog.prices import compute_boq_item, compute_labor_cost
 from app.common.normalize import source_region
+from app.e2e.lighting import build_lighting_boq
 from app.jobs.queue import get_job_queue
 
 if TYPE_CHECKING:
@@ -782,6 +783,53 @@ def e2e_run_body(
         schedule_blocks=schedule_blocks,
     )
 
+    # Lighting discipline (spec §5 v2 + spec v3 §7.4)
+    lighting_count = 0
+    try:
+        import pymupdf
+        from app.services.lighting.denoiser import extract_denoised_symbols
+        from app.services.lighting.room_mapper import build_room_polygons
+        from app.services.lighting.legend_parser import parse_legend
+        from app.services.lighting.loop_quantifier import (
+            build_loop_zones, assign_symbols_to_zones,
+        )
+        from app.services.lighting.text_clustering import extract_dali_loops
+        from app.services.lighting.reconciliation import deduplicate_loops
+
+        doc = pymupdf.open(file_path)
+        page = doc[0]
+        try:
+            lighting_symbols = extract_denoised_symbols(page)
+            lighting_rooms = build_room_polygons(page)
+            lighting_specs = parse_legend(page)
+            lighting_loops_raw = extract_dali_loops(page)
+            lighting_unique_loops, _ = deduplicate_loops(lighting_loops_raw)
+            lighting_zones = build_loop_zones(lighting_unique_loops, radius=4000.0)
+            assign_symbols_to_zones(lighting_symbols, lighting_zones, lighting_rooms)
+            lighting_rows = build_lighting_boq(lighting_symbols, lighting_rooms, lighting_specs, lighting_zones)
+
+            for row in lighting_rows:
+                boq_items.append({
+                    "assembly_type": row.assembly_type,
+                    "spec_code": row.spec_code,
+                    "loop_id": row.loop_id,
+                    "size": None,
+                    "unit": row.unit,
+                    "quantity": row.quantity,
+                    "unit_price": row.unit_price,
+                    "confidence_status": row.confidence_status,
+                    "confidence_score": row.confidence_score,
+                    "discipline": "lighting",
+                    "source_bbox_json": None,
+                    "derivation_json": None,
+                })
+            lighting_count = len(lighting_rows)
+        finally:
+            doc.close()
+    except Exception:
+        logger.exception("lighting sub-pipeline failed; skipping discipline")
+        lighting_count = 0
+
     # Optional persistence (default-off): write the full extraction
     # bundle through the persistence spine in its own committing session.
     estimate_id: uuid.UUID | None = None
@@ -807,6 +855,7 @@ def e2e_run_body(
         "unmapped_items": _aggregate_unmapped(unmapped_components),
         "flagged_symbols": aggregate_flagged(flagged_symbols),
         "data_quality": dq.as_dict(),
+        "disciplines": {"lighting": lighting_count},
     }
     if persist and estimate_id is not None:
         response["estimate_id"] = str(estimate_id)

@@ -16,8 +16,8 @@ from tests.fixtures.make_plumbing_fire_fixture import (
     polyline_length_pt,
 )
 from tests.test_phase4_fixture_pdf import PDF, _ensure_fixture
+from tests._e2e_async import post_and_wait
 
-client = TestClient(app)
 SAMPLES = Path(__file__).resolve().parents[2] / "data" / "samples"
 MMC_SHEET = "MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf"
 
@@ -30,18 +30,18 @@ DOWNPIPE_PIN = 11
 PT_TO_M = 100 * 25.4 / 72 / 1000
 
 
-def _run(pdf_path: Path, **params):
+@pytest.fixture(scope="module")
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def _run(client: TestClient, pdf_path: Path, **params):
     pdf_path = Path(pdf_path)
     if not pdf_path.exists():
         pytest.skip(f"sample missing: {pdf_path}")
-    with open(pdf_path, "rb") as f:
-        resp = client.post(
-            "/api/e2e/run",
-            files={"file": (pdf_path.name, f.read(), "application/pdf")},
-            params=params,
-        )
-    assert resp.status_code == 200, resp.text
-    return resp.json()
+    body = post_and_wait(client, str(pdf_path), **params)
+    return body["result"]
 
 
 def _pipe_qty(boq, assembly_type, material_name):
@@ -52,9 +52,9 @@ def _pipe_qty(boq, assembly_type, material_name):
     )
 
 
-def test_plumbing_fire_fixture_end_to_end():
+def test_plumbing_fire_fixture_end_to_end(client):
     _ensure_fixture()
-    payload = _run(PDF)
+    payload = _run(client, PDF)
     boq = payload["boq_items"]
 
     # Counted devices: sprinkler heads and the four FA device types.
@@ -136,8 +136,8 @@ def test_plumbing_fire_fixture_end_to_end():
     assert not any(i["assembly_type"] == "vent" for i in boq)
 
 
-def test_mmc_rain_downpipes_counted():
-    payload = _run(SAMPLES / MMC_SHEET)
+def test_mmc_rain_downpipes_counted(client):
+    payload = _run(client, SAMPLES / MMC_SHEET)
     kits = [
         i
         for i in payload["boq_items"]
@@ -148,8 +148,8 @@ def test_mmc_rain_downpipes_counted():
     assert sum(k["quantity"] for k in kits) == pytest.approx(DOWNPIPE_PIN)
 
 
-def test_mmc_fire_alarm_layer_honest_zero():
-    payload = _run(SAMPLES / MMC_SHEET, persist=True)
+def test_mmc_fire_alarm_layer_honest_zero(client):
+    payload = _run(client, SAMPLES / MMC_SHEET, persist=True)
 
     alarm_assemblies = {"smoke_detector", "call_point", "sounder", "facp"}
     assert not any(i["assembly_type"] in alarm_assemblies for i in payload["boq_items"])

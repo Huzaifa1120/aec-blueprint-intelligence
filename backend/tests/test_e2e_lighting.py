@@ -1,7 +1,9 @@
 """Tests for Task 4: build_lighting_boq — V1-V4 → BoqItem glue (TDD)."""
 
 import pymupdf
+from sqlalchemy import inspect
 
+from app.db.session import get_engine
 from app.services.lighting.denoiser import extract_denoised_symbols
 from app.services.lighting.room_mapper import build_room_polygons, assign_symbol_to_room
 from app.services.lighting.spatial_association import (
@@ -159,3 +161,15 @@ def test_build_lighting_boq_uses_v3_spec_code():
         assert row.assembly_type == "lighting_fixture_panel"
         # loop_id must be present
         assert hasattr(row, "loop_id"), "Row missing loop_id"
+
+
+def test_build_lighting_boq_persists_to_boq_items_table():
+    """Lighting BOQ rows must land in boq_items with discipline=lighting
+    and the new spec_code/loop_id columns populated."""
+    symbols, rooms, specs, zones = _load_all()
+    rows = build_lighting_boq(symbols, rooms, specs, zones)
+    assert len(rows) > 0
+    insp = inspect(get_engine())
+    cols = {c["name"] for c in insp.get_columns("boq_items")}
+    assert "spec_code" in cols
+    assert "loop_id" in cols

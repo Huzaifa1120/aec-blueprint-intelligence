@@ -27,12 +27,20 @@ import math
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
+from app.main import app
 from app.parsing.routes import (
     compute_length_meters,
     extract_polyline_from_items,
     measure_routes,
 )
+
+
+@pytest.fixture(scope="module")
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
 
 SAMPLE = (
     Path(__file__).resolve().parents[2]
@@ -105,15 +113,14 @@ def test_open_chain_unchanged():
 # ---------------------------------------------------------------------------
 
 
-def test_mmc_tray_route_length_matches_drawn_truth(tmp_path, monkeypatch):
+def test_mmc_tray_route_length_matches_drawn_truth(client, tmp_path, monkeypatch):
     """Drawn truth: legs 111.12+168.84+218.16 pt + ~6.12 pt junction crossing
     ≈ 504.2 pt ⇒ ×(100×25.4/(72×1000)) ≈ 17.79 m at 1:100. The old pipeline
     billed 0.752 m (one sub-cutoff junction fragment, perimeter-walked)."""
     from sqlalchemy import create_engine
 
     from app.db.base import Base
-    from app.main import app
-    from fastapi.testclient import TestClient
+    from tests._e2e_async import post_and_wait
 
     db_path = tmp_path / "test_tray.db"
     engine = create_engine(f"sqlite:///{db_path}")
@@ -123,22 +130,17 @@ def test_mmc_tray_route_length_matches_drawn_truth(tmp_path, monkeypatch):
         "app.e2e.router.get_engine",
         lambda: create_engine(f"sqlite:///{db_path}"),
     )
-    with open(SAMPLE, "rb") as fh:
-        resp = TestClient(app).post(
-            "/api/e2e/run",
-            files={"file": ("sample.pdf", fh, "application/pdf")},
-        )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
+    body = post_and_wait(client, str(SAMPLE), persist=False)
+    result = body["result"]
 
     # The legacy linear route rule bills BOM constants × length_m, so the
     # cable_tray_section row's quantity equals the measured run length.
     lengths = [
         item["quantity"]
-        for item in body["boq_items"]
+        for item in result["boq_items"]
         if "tray" in str(item.get("material_name", "")).lower()
     ]
-    assert lengths, f"no cable tray rows in BOQ: {body['boq_items'][:5]}"
+    assert lengths, f"no cable tray rows in BOQ: {result['boq_items'][:5]}"
     assert max(lengths) == pytest.approx(17.79, rel=0.02)
 
 

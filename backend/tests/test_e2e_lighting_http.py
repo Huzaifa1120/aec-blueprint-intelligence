@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 SAMPLE_PDF = (
     "C:/Users/saada/Desktop/H-new/aec-blueprint-intelligence/"
-    "data/samples/MMC-JVC-CD-ELEC-3902_AC-WIRE-Model.pdf"
+    "data/samples/P0050-AMC-A-E2-2F-EL-122-02-B, Lighting Layout, 2nd Floor, Part-1.pdf"
 )
 
 
@@ -26,6 +26,28 @@ def _post_run(client: TestClient, *, persist: bool = False, project_id: str | No
         if project_id:
             params["project_id"] = project_id
         return client.post("/api/e2e/run", files=files, params=params)
+
+
+def _post_and_wait(client: TestClient, pdf_path: str, *, persist: bool = False):
+    """POST a PDF to /api/e2e/run and poll until done/failed."""
+    with open(pdf_path, "rb") as fh:
+        files = {"file": ("sample.pdf", fh, "application/pdf")}
+        params = {"persist": str(persist).lower()}
+        resp = client.post("/api/e2e/run", files=files, params=params)
+    assert resp.status_code == 202
+    job_id = resp.json()["job_id"]
+    deadline = time.time() + 90.0
+    while time.time() < deadline:
+        resp = client.get(f"/api/jobs/{job_id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        if body["status"] in ("done", "failed"):
+            break
+        time.sleep(1.0)
+    else:
+        raise AssertionError(f"Job did not complete within 90s. Final status: {body}")
+    assert body["status"] == "done", f"Job failed: {body.get('error')}"
+    return body
 
 
 def test_post_e2e_run_returns_202_with_job_id():
@@ -132,3 +154,14 @@ def test_get_unknown_job_returns_404():
         body = resp.json()
         assert "detail" in body
         assert "not found or expired" in body["detail"].lower()
+
+
+def test_post_e2e_run_with_lighting_pdf_produces_estimate_with_lighting_boq():
+    """G1 acceptance: the P0050 Part-1 PDF must produce BoqItem rows
+    with discipline=lighting, populated spec_code + loop_id, unpriced."""
+    from app.main import app
+    with TestClient(app) as client:
+        body = _post_and_wait(client, SAMPLE_PDF, persist=True)
+        result = body["result"]
+        assert "disciplines" in result
+        assert any(b.get("discipline") == "lighting" for b in result.get("boq_items", []))

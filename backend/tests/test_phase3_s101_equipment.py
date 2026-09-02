@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from tests._e2e_async import post_and_wait
 
 S101 = str(Path(__file__).resolve().parents[2] / "data" / "samples" / "ABC-SC03-S101.pdf")
 
@@ -30,7 +31,9 @@ N_EQUIPMENT_UNITS = 277
 
 @pytest.fixture(scope="module")
 def client():
-    return TestClient(app)
+    from app.main import app
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 @pytest.mark.skipif(not Path(S101).exists(), reason="client fixture not present")
@@ -58,16 +61,11 @@ class TestS101Equipment:
             lambda: create_engine(f"sqlite:///{db_path}"),
         )
 
-        with open(S101, "rb") as f:
-            response = client.post(
-                "/api/e2e/run",
-                files={"file": ("S101.pdf", f, "application/pdf")},
-            )
-        assert response.status_code == 200, response.text
-        body = response.json()
-        assert body["status"] == "ok", f"Pipeline failed: {body}"
+        body = post_and_wait(client, S101, persist=False)
+        result = body["result"]
+        assert result["status"] == "ok", f"Pipeline failed: {result}"
 
-        equipment = [it for it in body["boq_items"] if it["assembly_type"] == "hvac_equipment"]
+        equipment = [it for it in result["boq_items"] if it["assembly_type"] == "hvac_equipment"]
         assert equipment, "no hvac_equipment rows derived from S101"
 
         # PENDING HUMAN VERIFICATION — counts are pipeline-derived (debug run

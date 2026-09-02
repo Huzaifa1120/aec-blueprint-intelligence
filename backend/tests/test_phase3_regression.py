@@ -17,6 +17,7 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
+from tests._e2e_async import post_and_wait
 
 from app.main import app
 from tests.fixtures.make_hvac_fixture import build_hvac_fixture
@@ -32,7 +33,9 @@ SAMPLE = os.path.join(
 
 @pytest.fixture(scope="module")
 def client():
-    return TestClient(app)
+    from app.main import app
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 class TestMechanicalE2E:
@@ -40,16 +43,11 @@ class TestMechanicalE2E:
         pdf_path = str(tmp_path / "hvac_fixture.pdf")
         expected = build_hvac_fixture(pdf_path)
 
-        with open(pdf_path, "rb") as f:
-            response = client.post(
-                "/api/e2e/run",
-                files={"file": ("hvac.pdf", f, "application/pdf")},
-            )
-        assert response.status_code == 200
-        body = response.json()
-        assert body["status"] == "ok"
+        body = post_and_wait(client, pdf_path, persist=False)
+        result = body["result"]
+        assert result["status"] == "ok"
 
-        items = body["boq_items"]
+        items = result["boq_items"]
         by_material = {}
         for item in items:
             by_material.setdefault(item["material_name"], []).append(item)
@@ -122,16 +120,11 @@ class TestMechanicalE2E:
         """Phase 2 regression lock: no mechanical rows on the electrical sheet."""
         if not os.path.exists(SAMPLE):
             pytest.skip("sample PDF not present locally")
-        with open(SAMPLE, "rb") as f:
-            response = client.post(
-                "/api/e2e/run",
-                files={"file": ("sample.pdf", f, "application/pdf")},
-            )
-        assert response.status_code == 200
-        body = response.json()
-        mechanical = {it["assembly_type"] for it in body["boq_items"]} & {
+        body = post_and_wait(client, SAMPLE, persist=False)
+        result = body["result"]
+        mechanical = {it["assembly_type"] for it in result["boq_items"]} & {
             "duct_rectangular", "duct_round", "pipe_insulated", "hvac_equipment",
         }
         assert mechanical == set()
-        types = {it["assembly_type"] for it in body["boq_items"]}
+        types = {it["assembly_type"] for it in result["boq_items"]}
         assert "cable_tray" in types

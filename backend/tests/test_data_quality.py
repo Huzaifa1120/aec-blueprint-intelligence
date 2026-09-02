@@ -7,12 +7,14 @@ upload classification — must be tallied and surfaced in the response under
 ``data_quality``.
 """
 
+import tempfile
 from fastapi.testclient import TestClient
 
 import app.e2e.router as er
 from app.main import app
 from app.parsing.fixture_units import accumulate_fixture_units
 from app.parsing.routes import measure_routes
+from tests._e2e_async import post_and_wait
 
 
 def _fake_parsed(**overrides):
@@ -37,16 +39,21 @@ def _post_run(monkeypatch, parsed):
     )
     monkeypatch.setattr(er, "parse_pdf", lambda p: parsed)
     client = TestClient(app)
-    return client.post(
-        "/api/e2e/run",
-        files={"file": ("t.pdf", b"%PDF-1.4 fake", "application/pdf")},
-    )
+    # Write fake PDF to temp file for post_and_wait helper
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(b"%PDF-1.4 fake")
+        tmp_path = tmp.name
+    try:
+        body = post_and_wait(client, tmp_path, persist=False, timeout=30.0)
+    finally:
+        import os
+        os.unlink(tmp_path)
+    return body
 
 
 def test_response_carries_data_quality_block(monkeypatch):
     resp = _post_run(monkeypatch, _fake_parsed())
-    assert resp.status_code == 200
-    body = resp.json()
+    body = resp["result"]
     assert body["data_quality"] == {
         "dropped_routes": 0,
         "dropped_symbols": 0,
@@ -81,8 +88,7 @@ def test_dropped_routes_counted(monkeypatch):
     # assembly any more, so the measured tray route must drop at gate 1.
     monkeypatch.setattr(er, "ROUTE_ASSEMBLIES", frozenset())
     resp = _post_run(monkeypatch, _fake_parsed(raw_drawings=drawings, clusters=clusters))
-    assert resp.status_code == 200
-    body = resp.json()
+    body = resp["result"]
     assert body["routes_measured"] == 1
     assert body["data_quality"]["dropped_routes"] == 1
 
@@ -100,8 +106,7 @@ def test_dropped_symbols_counted(monkeypatch):
     }
     monkeypatch.setattr(er, "count_components", lambda *a, **k: [ghost])
     resp = _post_run(monkeypatch, _fake_parsed())
-    assert resp.status_code == 200
-    body = resp.json()
+    body = resp["result"]
     assert body["components_found"] == 1
     assert body["boq_items"] == []
     assert body["data_quality"]["dropped_symbols"] == 1
@@ -119,8 +124,7 @@ def test_unmapped_count_tallied(monkeypatch):
         monkeypatch,
         _fake_parsed(raw_drawings=drawings, ocg_registry={"PSEUDO-GRID": {}}),
     )
-    assert resp.status_code == 200
-    body = resp.json()
+    body = resp["result"]
     assert body["data_quality"]["unmapped_count"] == 1
 
 
@@ -130,12 +134,22 @@ def test_classifier_error_degrades_and_counts(monkeypatch):
 
     monkeypatch.setattr(er, "classify_upload", boom)
     client = TestClient(app)
-    resp = client.post(
+    r = client.post(
         "/api/e2e/run",
         files={"file": ("t.pdf", b"%PDF-1.4 fake", "application/pdf")},
     )
-    assert resp.status_code == 200
-    body = resp.json()
+    assert r.status_code == 202, f"enqueue failed: {r.status_code} {r.text}"
+    job_id = r.json()["job_id"]
+    import time
+    deadline = time.time() + 30.0
+    body = None
+    while time.time() < deadline:
+        body = client.get(f"/api/jobs/{job_id}").json()
+        if body["status"] in ("done", "failed"):
+            break
+        time.sleep(0.1)
+    assert body is not None and body["status"] == "done", f"job did not finish: {body}"
+    body = body["result"]
     assert body["status"] == "raster"
     assert body["data_quality"]["classifier_errors"] == 1
 
