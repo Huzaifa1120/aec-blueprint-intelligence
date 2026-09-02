@@ -45,25 +45,19 @@ def client():
         yield test_client
 
 
-def _run_e2e(client: TestClient, pdf_path: str):
-    with open(pdf_path, "rb") as f:
-        return client.post(
-            "/api/e2e/run",
-            files={"file": (os.path.basename(pdf_path), f, "application/pdf")},
-            params={"persist": True},
-        )
-
-
 @pytest.fixture(scope="module")
 def plumbing_run(client, tmp_path_factory):
     """Persist-run on the synthetic plumbing/fire fixture (distinct sheet name)."""
+    from tests._e2e_async import post_and_wait
+
     _ensure_fixture()
     pdf_dir = tmp_path_factory.mktemp("source_regions")
     pdf_path = pdf_dir / "plumbing_fire_src.pdf"
     shutil.copyfile(PDF, pdf_path)
-    response = _run_e2e(client, str(pdf_path))
-    assert response.status_code == 200, response.text
-    return response.json()
+    body = post_and_wait(client, str(pdf_path), persist=True)
+    result = body["result"]
+    assert result["status"] == "ok", result
+    return result
 
 
 def _route_lines(body: dict) -> list[dict]:
@@ -229,6 +223,7 @@ def test_assumed_scale_persists_response_tier(client, tmp_path, monkeypatch):
     build_plumbing_fire_fixture(str(tmp_path / "plumbing_fire_assumed.pdf"))
 
     import app.e2e.router as router_module
+    from tests._e2e_async import post_and_wait
 
     real_resolve_scale = router_module.resolve_scale
     # Force the explicit assumed-scale stamp (spec v3 §7.4) for the run.
@@ -236,17 +231,18 @@ def test_assumed_scale_persists_response_tier(client, tmp_path, monkeypatch):
         router_module, "resolve_scale", lambda spans: real_resolve_scale([])
     )
 
-    response = _run_e2e(client, str(tmp_path / "plumbing_fire_assumed.pdf"))
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["scale"]["status"] == "assumed"
-    assert body["boq_items"], "expected BOQ lines under assumed scale"
+    pdf_path = str(tmp_path / "plumbing_fire_assumed.pdf")
+    body = post_and_wait(client, pdf_path, persist=True)
+    result = body["result"]
+    assert result["status"] == "ok", result
+    assert result["scale"]["status"] == "assumed"
+    assert result["boq_items"], "expected BOQ lines under assumed scale"
 
     # T3 carve-out: routes rest on scale-derived lengths → ASSUMED (0.3);
     # counted components are count × rule multiplier, scale-independent by
     # construction → stay DERIVED.
-    response_routes = _route_lines(body)
-    response_components = _component_lines(body)
+    response_routes = _route_lines(result)
+    response_components = _component_lines(result)
     assert response_routes and response_components
     assert {ln["confidence_status"] for ln in response_routes} == {"ASSUMED"}
     assert {round(float(ln["confidence_score"]), 4) for ln in response_routes} == {
@@ -254,14 +250,14 @@ def test_assumed_scale_persists_response_tier(client, tmp_path, monkeypatch):
     }
     assert {ln["confidence_status"] for ln in response_components} == {"DERIVED"}
 
-    boq = client.get(f"/api/estimates/{body['estimate_id']}/boq").json()
+    boq = client.get(f"/api/estimates/{result['estimate_id']}/boq").json()
     assert boq["scale"]["status"] == "assumed"
-    assert boq["data_quality"]["scale_str"] == body["scale"]["value"]
+    assert boq["data_quality"]["scale_str"] == result["scale"]["value"]
 
     with OrmSession(get_engine()) as db:
         items = (
             db.query(BoqItem)
-            .filter_by(estimate_id=uuid.UUID(body["estimate_id"]))
+            .filter_by(estimate_id=uuid.UUID(result["estimate_id"]))
             .all()
         )
     assert items

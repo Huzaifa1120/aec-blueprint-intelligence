@@ -27,7 +27,11 @@ from app.catalog.prices import (
     total_cost,
 )
 
-client = TestClient(app)
+
+@pytest.fixture(scope="module")
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 @pytest.fixture(scope="function")
@@ -384,7 +388,7 @@ def test_labor_rates_affect_boq_calculations(db_session):
 # T9: test_catalog_import_endpoint_updates_prices
 # ──────────────────────────────────────────────
 
-def test_catalog_import_endpoint_updates_prices(tmp_path, monkeypatch):
+def test_catalog_import_endpoint_updates_prices(client, tmp_path, monkeypatch):
     """Phase 2 DoD: catalogs editable without code changes via POST /api/catalog/import.
 
     Uploads a CSV of material prices through the public API endpoint and verifies
@@ -431,7 +435,7 @@ def test_catalog_import_endpoint_updates_prices(tmp_path, monkeypatch):
 # T10: test_e2e_pipeline_endpoint_on_sample
 # ──────────────────────────────────────────────
 
-def test_e2e_pipeline_endpoint_on_sample(tmp_path, monkeypatch):
+def test_e2e_pipeline_endpoint_on_sample(client, tmp_path, monkeypatch):
     """Phase 2 DoD: full PDF → BOQ pipeline runs end-to-end on the sample sheet.
 
     Uploads the real electrical sample through POST /api/e2e/run and verifies
@@ -479,7 +483,7 @@ def test_e2e_pipeline_endpoint_on_sample(tmp_path, monkeypatch):
 # EP3: test_ep3_e2e_pipeline_validation_on_sample
 # ──────────────────────────────────────────────
 
-def test_ep3_e2e_pipeline_validation_on_sample(tmp_path, monkeypatch):
+def test_ep3_e2e_pipeline_validation_on_sample(client, tmp_path, monkeypatch):
     """Phase 2 DoD (EP3): full E2E pipeline validated against the real sample PDF.
 
     Closes the previously-skipped EP3 gate. Asserts every DoD sub-gate:

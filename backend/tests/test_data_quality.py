@@ -8,6 +8,7 @@ upload classification — must be tallied and surfaced in the response under
 """
 
 import tempfile
+import pytest
 from fastapi.testclient import TestClient
 
 import app.e2e.router as er
@@ -15,6 +16,12 @@ from app.main import app
 from app.parsing.fixture_units import accumulate_fixture_units
 from app.parsing.routes import measure_routes
 from tests._e2e_async import post_and_wait
+
+
+@pytest.fixture(scope="module")
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def _fake_parsed(**overrides):
@@ -31,14 +38,13 @@ def _fake_parsed(**overrides):
     return fake
 
 
-def _post_run(monkeypatch, parsed):
+def _post_run(client: TestClient, monkeypatch, parsed):
     monkeypatch.setattr(
         er,
         "classify_upload",
         lambda p: {"status": "vector", "source_quality": "layered_vector"},
     )
     monkeypatch.setattr(er, "parse_pdf", lambda p: parsed)
-    client = TestClient(app)
     # Write fake PDF to temp file for post_and_wait helper
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(b"%PDF-1.4 fake")
@@ -51,8 +57,8 @@ def _post_run(monkeypatch, parsed):
     return body
 
 
-def test_response_carries_data_quality_block(monkeypatch):
-    resp = _post_run(monkeypatch, _fake_parsed())
+def test_response_carries_data_quality_block(client, monkeypatch):
+    resp = _post_run(client, monkeypatch, _fake_parsed())
     body = resp["result"]
     assert body["data_quality"] == {
         "dropped_routes": 0,
@@ -66,7 +72,7 @@ def test_response_carries_data_quality_block(monkeypatch):
     }
 
 
-def test_dropped_routes_counted(monkeypatch):
+def test_dropped_routes_counted(client, monkeypatch):
     drawings = [
         {
             "id": "p1",
@@ -87,13 +93,13 @@ def test_dropped_routes_counted(monkeypatch):
     # Simulate YAML/code drift: no route-layer cluster resolves to a route
     # assembly any more, so the measured tray route must drop at gate 1.
     monkeypatch.setattr(er, "ROUTE_ASSEMBLIES", frozenset())
-    resp = _post_run(monkeypatch, _fake_parsed(raw_drawings=drawings, clusters=clusters))
+    resp = _post_run(client, monkeypatch, _fake_parsed(raw_drawings=drawings, clusters=clusters))
     body = resp["result"]
     assert body["routes_measured"] == 1
     assert body["data_quality"]["dropped_routes"] == 1
 
 
-def test_dropped_symbols_counted(monkeypatch):
+def test_dropped_symbols_counted(client, monkeypatch):
     ghost = {
         "assembly_type": "ghost_widget",
         "count": 1,
@@ -105,14 +111,14 @@ def test_dropped_symbols_counted(monkeypatch):
         "confidence_score": 1.0,
     }
     monkeypatch.setattr(er, "count_components", lambda *a, **k: [ghost])
-    resp = _post_run(monkeypatch, _fake_parsed())
+    resp = _post_run(client, monkeypatch, _fake_parsed())
     body = resp["result"]
     assert body["components_found"] == 1
     assert body["boq_items"] == []
     assert body["data_quality"]["dropped_symbols"] == 1
 
 
-def test_unmapped_count_tallied(monkeypatch):
+def test_unmapped_count_tallied(client, monkeypatch):
     drawings = [
         {
             "id": "u1",
@@ -121,6 +127,7 @@ def test_unmapped_count_tallied(monkeypatch):
         }
     ]
     resp = _post_run(
+        client,
         monkeypatch,
         _fake_parsed(raw_drawings=drawings, ocg_registry={"PSEUDO-GRID": {}}),
     )
@@ -128,27 +135,20 @@ def test_unmapped_count_tallied(monkeypatch):
     assert body["data_quality"]["unmapped_count"] == 1
 
 
-def test_classifier_error_degrades_and_counts(monkeypatch):
+def test_classifier_error_degrades_and_counts(client, monkeypatch):
     def boom(p):
         raise RuntimeError("classify exploded")
 
     monkeypatch.setattr(er, "classify_upload", boom)
-    client = TestClient(app)
-    r = client.post(
-        "/api/e2e/run",
-        files={"file": ("t.pdf", b"%PDF-1.4 fake", "application/pdf")},
-    )
-    assert r.status_code == 202, f"enqueue failed: {r.status_code} {r.text}"
-    job_id = r.json()["job_id"]
-    import time
-    deadline = time.time() + 30.0
-    body = None
-    while time.time() < deadline:
-        body = client.get(f"/api/jobs/{job_id}").json()
-        if body["status"] in ("done", "failed"):
-            break
-        time.sleep(0.1)
-    assert body is not None and body["status"] == "done", f"job did not finish: {body}"
+    # Create a dummy PDF file
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(b"%PDF-1.4 fake")
+        tmp_path = tmp.name
+    try:
+        body = post_and_wait(client, tmp_path, persist=False, timeout=30.0)
+    finally:
+        import os
+        os.unlink(tmp_path)
     body = body["result"]
     assert body["status"] == "raster"
     assert body["data_quality"]["classifier_errors"] == 1

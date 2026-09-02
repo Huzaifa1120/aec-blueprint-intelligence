@@ -1,4 +1,5 @@
 """Helper: poll an async e2e_run job to completion in tests."""
+import os
 import time
 from fastapi.testclient import TestClient
 
@@ -6,10 +7,11 @@ from fastapi.testclient import TestClient
 def post_and_wait(
     client: TestClient, file_path: str, persist: bool = False, timeout: float = 90.0
 ) -> dict:
+    filename = os.path.basename(file_path)
     with open(file_path, "rb") as f:
         r = client.post(
             f"/api/e2e/run?persist={str(persist).lower()}",
-            files={"file": ("test.pdf", f, "application/pdf")},
+            files={"file": (filename, f, "application/pdf")},
         )
     assert r.status_code == 202, f"enqueue failed: {r.status_code} {r.text}"
     job_id = r.json()["job_id"]

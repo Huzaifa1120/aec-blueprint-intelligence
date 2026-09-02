@@ -47,23 +47,17 @@ def client():
         yield test_client
 
 
-def _run_e2e(client: TestClient, pdf_path: str):
-    with open(pdf_path, "rb") as f:
-        return client.post(
-            "/api/e2e/run",
-            files={"file": (os.path.basename(pdf_path), f, "application/pdf")},
-            params={"persist": True},
-        )
-
-
 @pytest.fixture(scope="module")
 def hvac_run(client, tmp_path_factory):
+    from tests._e2e_async import post_and_wait
+
     pdf_dir = tmp_path_factory.mktemp("hvac")
     pdf_path = str(pdf_dir / "hvac_fixture.pdf")
     build_hvac_fixture(pdf_path)
-    response = _run_e2e(client, pdf_path)
-    assert response.status_code == 200, response.text
-    return response.json()
+    body = post_and_wait(client, pdf_path, persist=True)
+    result = body["result"]
+    assert result["status"] == "ok", result
+    return result
 
 
 def _build_unmapped_fixture(path: str) -> None:
@@ -101,12 +95,15 @@ def _build_unmapped_fixture(path: str) -> None:
 
 @pytest.fixture(scope="module")
 def unmapped_run(client, tmp_path_factory):
+    from tests._e2e_async import post_and_wait
+
     pdf_dir = tmp_path_factory.mktemp("unmapped")
     pdf_path = str(pdf_dir / "unmapped_fixture.pdf")
     _build_unmapped_fixture(pdf_path)
-    response = _run_e2e(client, pdf_path)
-    assert response.status_code == 200, response.text
-    return response.json()
+    body = post_and_wait(client, pdf_path, persist=True)
+    result = body["result"]
+    assert result["status"] == "ok", result
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -286,14 +283,15 @@ def test_partial_dim_cascade_persists_assumed_tier(client, tmp_path, monkeypatch
         return {"width_mm": 600.0, "source": "label", "ref": "text_span:600x400"}
 
     monkeypatch.setattr(router_module, "resolve_route_size", _width_only)
-    response = _run_e2e(client, pdf_path)
-    assert response.status_code == 200, response.text
-    body = response.json()
-    sized_lines = [ln for ln in body["boq_items"] if ln.get("size_source")]
+    from tests._e2e_async import post_and_wait
+    body = post_and_wait(client, pdf_path, persist=True)
+    result = body["result"]
+    assert result["status"] == "ok", result
+    sized_lines = [ln for ln in result["boq_items"] if ln.get("size_source")]
     assert sized_lines, "expected sized-route BOQ lines"
     assert all(ln["size_source"] == "assumed" for ln in sized_lines)
 
-    boq = client.get(f"/api/estimates/{body['estimate_id']}/boq").json()
+    boq = client.get(f"/api/estimates/{result['estimate_id']}/boq").json()
     sized_routes = [r for r in boq["routes"] if r.get("size_json")]
     assert sized_routes, "no persisted route carries size_json"
     for route in sized_routes:
@@ -365,16 +363,12 @@ def test_unsized_route_rule_failure_drops_route_not_request(client, tmp_path, mo
 
     monkeypatch.setattr(router_module, "apply_assembly", _raising_for_unsized)
 
-    with open(pdf_path, "rb") as f:
-        response = client.post(
-            "/api/e2e/run",
-            files={"file": ("conduit_fixture.pdf", f, "application/pdf")},
-        )
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["status"] == "ok"
-    assert body["routes_measured"] >= 1, "conduit run must be measured before the drop"
-    names = {ln["material_name"] for ln in body["boq_items"]}
+    from tests._e2e_async import post_and_wait
+    body = post_and_wait(client, pdf_path, persist=False)
+    result = body["result"]
+    assert result["status"] == "ok", result
+    assert result["routes_measured"] >= 1, "conduit run must be measured before the drop"
+    names = {ln["material_name"] for ln in result["boq_items"]}
     assert not names & {"conduit_pipe", "conduit_fitting", "clamp"}, (
         f"failed route leaked BOQ lines: {sorted(names)}"
     )

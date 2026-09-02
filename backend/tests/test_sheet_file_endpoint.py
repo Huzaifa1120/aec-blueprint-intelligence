@@ -24,6 +24,7 @@ from app.db.models.estimate import Estimate
 from app.db.models.project import Project
 from app.db.session import get_engine
 from tests.fixtures.make_hvac_fixture import build_hvac_fixture
+from tests._e2e_async import post_and_wait
 
 
 # ---------------------------------------------------------------------------
@@ -37,15 +38,6 @@ def client():
         yield test_client
 
 
-def _run_e2e(client: TestClient, pdf_path: str):
-    with open(pdf_path, "rb") as f:
-        return client.post(
-            "/api/e2e/run",
-            files={"file": (os.path.basename(pdf_path), f, "application/pdf")},
-            params={"persist": True},
-        )
-
-
 @pytest.fixture(scope="module")
 def stored_run(client, tmp_path_factory):
     """Persist-run on the synthetic fixture with known upload bytes."""
@@ -54,9 +46,11 @@ def stored_run(client, tmp_path_factory):
     build_hvac_fixture(pdf_path)
     with open(pdf_path, "rb") as f:
         upload_bytes = f.read()
-    response = _run_e2e(client, pdf_path)
-    assert response.status_code == 200, response.text
-    return response.json(), upload_bytes
+    body = post_and_wait(client, pdf_path, persist=True)
+    result = body["result"]
+    assert result["status"] == "ok", result
+    assert "estimate_id" in result
+    return result, upload_bytes
 
 
 # ---------------------------------------------------------------------------

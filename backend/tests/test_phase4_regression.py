@@ -40,7 +40,9 @@ def _run(client: TestClient, pdf_path: Path, **params):
     pdf_path = Path(pdf_path)
     if not pdf_path.exists():
         pytest.skip(f"sample missing: {pdf_path}")
-    body = post_and_wait(client, str(pdf_path), **params)
+    # MMC sample is large; allow extra time for the full pipeline
+    timeout = params.pop("timeout", 180.0)
+    body = post_and_wait(client, str(pdf_path), timeout=timeout, **params)
     return body["result"]
 
 
