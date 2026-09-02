@@ -6,17 +6,21 @@
 **Related code:** V1–V4 lighting subagents on `feature/lighting-v3-v4-handoff` (commit `fe6ec87`)
 **Defect reference:** the P0050 lighting PDFs return `verdict=layered_vector` at the quality gate but `/api/e2e/run` returns `boq_items: []` + `estimate_id: null`; the frontend surfaces this as the misleading `QUALITY_CHECK_FAILED_COPY` ("Couldn't read this PDF's structure…")
 
+> **Validation report (2026-09-02):** see `docs/superpowers/reviews/2026-09-02-lighting-e2e-integration-validation.md` for the full review. This revision addresses F1, F2, F3, F5, F6, F7, F8, F10 from that report.
+
 ---
 
 ## 1. Problem
 
 The user uploaded a P0050 lighting layout PDF and saw "can't read the file, upload any other." Investigation showed three intertwined gaps:
 
-1. **V1–V4 lighting code exists on a feature branch but is not wired into the live `/api/e2e/run` route.** The code lives in `backend/app/services/lighting/` as an offline script (`reconciliation.py`). The live route uses `app/e2e/extraction.py` + `app/parsing/*` + `data/assemblies/*.yaml`. No assembly rule maps the `DALI CONTROL` OCG layer to a `lighting_fixture_*` assembly, so the live pipeline correctly finds 0 BOQ rows.
+1. **V1–V4 lighting code exists on a feature branch but is not wired into the live `/api/e2e/run` route.** The code lives in `backend/app/services/lighting/` as an offline script (`reconciliation.py`). The live route uses `app/e2e/extraction.py` + `app/parsing/*` + `data/assemblies/*.yaml`. The existing `data/assemblies/lighting_outlet.yaml` (loaded by `app/assembly/rules.py`) keys on `legend_keywords: [LIGHTING, LIGHT FIXTURE, …]` — it never sees `DALI CONTROL` symbols, so the live pipeline correctly finds 0 lighting BOQ rows.
 2. **The e2e run takes ~50 s on a 96k-path P0050 PDF.** The frontend's `fetch` has no timeout; in the browser the user sees a hang, then a misleading "couldn't read" error.
 3. **The empty-BOQ result is presented as a generic "pipeline failure."** `app/page.tsx:120-127` treats `boq_items=[]` + `estimate_id=null` as failure with no actionable message.
 
 This spec closes all three gaps in one coherent fix.
+
+> **Baseline (2026-09-02):** pytest `--collect-only` on `main` reports **431 tests collected**. Plan's T9 step 1 targets **431 → 451 baseline** (24 new tests added on top). An unrelated pre-existing failure in `test_accuracy_conformance_migration.py` (SQLite batch-mode migration bug) is **out of scope** for this spec and is tracked separately.
 
 ---
 
@@ -51,8 +55,9 @@ This spec closes all three gaps in one coherent fix.
                   ┌─────────────────────────┐
    POST /api/e2e  │  app/jobs/              │  {job_id, status_url}    < 500ms
    /run (file)    │  - InMemoryJobQueue     │
-   ──────────────►│  - run_lighting_e2e()   │  (background thread)
-                  │  - persist()            │
+   ──────────────►│  - run_e2e_job()        │  (background thread,
+                  │  - lifespan:            │   set_runner() called
+                  │    set_runner()         │   at app startup)
                   └────────┬────────────────┘
                            │
                   ┌────────▼────────────────┐
@@ -64,11 +69,21 @@ This spec closes all three gaps in one coherent fix.
        ┌───────────────────┼─────────────────────┐
        │                   │                     │
 ┌──────▼────────┐  ┌────────▼──────┐  ┌──────────▼─────────┐
-│ V1 denoiser   │  │ V2 rooms      │  │ V3 legend specs    │
-│ (existing)    │  │ (existing)    │  │ + V4 loop quant.   │
+│ V1 denoiser   │  │ markers + room│  │ V2 rooms + V3      │
+│ (existing)    │  │ association   │  │ legend specs       │
+│               │  │ (spatial_     │  │                    │
+│               │  │  association  │  │                    │
+│               │  │  +room_mapper)│  │                    │
 └──────┬────────┘  └───────┬───────┘  └──────────┬─────────┘
        │                   │                    │
        └───────────────────┼────────────────────┘
+                           │
+                  ┌────────▼────────────────┐
+                  │  V4 loop quantifier     │  per-zone FixtureAssignment
+                  │  (assign_symbols_to_    │  with score_breakdown
+                  │   zones, with markers+  │
+                  │   rooms populated)      │
+                  └────────┬────────────────┘
                            │
                   ┌────────▼────────────────┐
                   │  new: app/e2e/          │
@@ -86,11 +101,11 @@ This spec closes all three gaps in one coherent fix.
 
 1. **`backend/app/jobs/__init__.py`** + **`backend/app/jobs/queue.py`** — in-memory FIFO job queue (threading.Lock + daemon worker thread).
 2. **`backend/app/jobs/router.py`** — `POST /api/e2e/run` becomes an enqueue; new `GET /api/jobs/{job_id}`.
-3. **`backend/app/e2e/lighting.py`** — `build_lighting_boq(symbols, rooms, loops, specs) → List[LightingBoqRow]` — the glue between V1–V4 outputs and the existing `payload.py` BOQ builder.
+3. **`backend/app/e2e/lighting.py`** — `build_lighting_boq(symbols, rooms, loops, specs) → List[LightingBoqRow]` — the glue between V1–V4 outputs and the persistence spine. **Revision from initial draft:** the V4 4-factor score breakdown is only meaningful if V1 symbols carry marker + room provenance. The original V3/V4 tests (`test_legend_parser.py`, `test_loop_quantifier.py`) leave `has_marker=False, marker_label=None, assigned_room=None` on the denoised symbols because V1 itself doesn't wire markers/rooms (those helpers live in `spatial_association.py` and `room_mapper.py`). `build_lighting_boq` MUST call `extract_markers` + `associate_markers_to_symbols` + per-symbol `assign_symbol_to_room` before scoring, otherwise the V4 score degrades to distance-only and the `score_breakdown` derivation is dishonest. See §8.1 for the full pipeline order.
 
 ### Two changed files
 
-1. **`backend/app/e2e/router.py`** — `e2e_run` becomes a thin enqueue wrapper; actual work moves to `app/jobs/queue.py::run_e2e_job()`. `persist=true` becomes part of the job request, not a separate code path.
+1. **`backend/app/e2e/router.py`** + **`backend/app/main.py`** — `e2e_run` becomes a thin enqueue wrapper; actual work moves to `app/jobs/queue.py::run_e2e_job()`. `main.py` gains a `lifespan` context that calls `get_job_queue().set_runner(run_e2e_job)` once at startup (the queue's daemon thread is started lazily on first `get_job_queue()` call; the runner is set during `lifespan`, so the worker is fully wired before the first request arrives).
 2. **`frontend/src/app/page.tsx` + `usePipelineRun.ts` + `lib/api.ts`** — `usePipelineRun` POSTs and returns a `job_id`, then polls `GET /api/jobs/{id}` with 2 s → 3 s → 4.5 s backoff (cap 10 s) up to 120 s. Empty-BOQ branch shows a specific message; polling timeout shows a real "still running" message.
 
 ### Two new alembic columns (one migration)
@@ -100,9 +115,9 @@ This spec closes all three gaps in one coherent fix.
 
 Both nullable. Existing mechanical/plumbing/fire rows untouched. Single alembic revision file (auto-generated).
 
-### One new YAML rule
+### No new YAML rule
 
-`data/assemblies/lighting_fixture_panel.yaml` — uses existing `match.layer_contains: "DALI CONTROL"` + `$variables` substitution + `tier: DERIVED` propagation. No rule engine changes.
+**Revised from initial draft:** the spec originally proposed `data/assemblies/lighting_fixture_panel.yaml` with `match.layer_contains` + `$variables` + `tier: DERIVED` keys. The real loader in `backend/app/assembly/rules.py` accepts only `name`/`rule_version`/`bom`/`labor`/`waste_factor` (plus `legend_keywords`/`variables`/`defaults`/`fixture_units`/`fixture_unit_gauge`); unknown keys are silently dropped. The V1–V4 lighting pipeline does NOT consult the assembly-rule loader at all — it filters by OCG layer directly inside `denoiser.py:21` (`TARGET_LAYER = "DALI CONTROL"`) and derives quantities via `loop_quantifier.assign_symbols_to_zones`. So a YAML file would be dead code. The new BoqItem rows surface through the existing persistence spine, tagged `discipline='lighting'` in the existing assembly rules (or via a `discipline` column if needed) — no new rule file required.
 
 ---
 
@@ -375,22 +390,23 @@ Supabase has all 22 tables at head `ee9f02b769f0` (verified 2026-09-02). The new
 
 ## 11. Files touched (summary)
 
-**New (8 files):**
+**New (8 files, +1 helper = 9 in plan):**
 - `backend/app/jobs/__init__.py`
 - `backend/app/jobs/queue.py`
 - `backend/app/jobs/router.py`
 - `backend/app/e2e/lighting.py`
-- `backend/app/e2e/lighting_rules.py` (helper for `match.layer_contains` / spec→assembly wiring)
 - `backend/alembic/versions/<rev>_add_lighting_spec_columns.py`
-- `data/assemblies/lighting_fixture_panel.yaml`
+- `backend/tests/_e2e_async.py` (test helper for T6)
 - `docs/superpowers/specs/2026-09-02-lighting-e2e-integration.md` ← this file
+- (no new YAML rule — see §4)
 
-**Modified (5 files):**
+**Modified (6 files):**
 - `backend/app/e2e/router.py` (split into enqueue + worker)
-- `backend/app/main.py` (include jobs router)
-- `frontend/src/lib/api.ts` (add `apiPostFormWithTimeout` or accept `signal`)
+- `backend/app/main.py` (add `lifespan` block to register runner; include jobs router)
+- `frontend/src/lib/api.ts` (add `signal` parameter to `apiPostForm`)
 - `frontend/src/hooks/usePipelineRun.ts` (poll + 120 s timeout)
 - `frontend/src/app/page.tsx` (use new hook; specific empty-BOQ message)
+- `backend/tests/test_data_quality.py` and 11 other test files (migrate to async poll — see plan T6)
 
 **Tests (4 new + 1 modified):**
 - `backend/tests/test_job_queue.py` (8 tests, new)
@@ -400,7 +416,7 @@ Supabase has all 22 tables at head `ee9f02b769f0` (verified 2026-09-02). The new
 - `frontend/src/hooks/usePipelineRun.test.tsx` (extend with 2 new tests)
 - `frontend/src/app/page.test.tsx` (extend with 2 new tests)
 
-**Total: 8 new files, 5 modified, 4 new test files + 2 test files extended. 24 new tests.**
+**Total: 8 new files + 1 test helper, 6 modified, 4 new test files + 2 test files extended. 24 new tests.**
 
 ---
 
@@ -411,7 +427,7 @@ Supabase has all 22 tables at head `ee9f02b769f0` (verified 2026-09-02). The new
 | In-memory queue lost on server restart | Log "queue cleared by restart" event; user re-uploads. Acceptable for v2 single-tenant internal tool (PRD §2). |
 | Background thread crashes silently | `try/except` around the whole `_run_job` body; `status=failed` + `error=traceback summary` on any exception. Worker thread never dies — it logs and re-enters the loop. |
 | V1–V4 import path from a feature branch into main | **Prerequisite:** `feature/lighting-v3-v4-handoff` (commit `fe6ec87`) MUST be merged to `main` before this spec's SDD execution. The SDD plan's first task is the merge. The lighting-v3-v4-handoff branch is local-only and unmerged (the previous session ran `--no-verify` due to pre-existing V0/V1 lint errors). After merge, the import path is `from app.services.lighting.XXX import YYY`. |
-| `POST /api/e2e/run` changing from sync to async is a breaking change to any test or caller that reads the response body directly | The implementation plan's T2 will update every existing e2e HTTP test to do `POST → assert 202 → poll job → assert done → use result`. The 4 existing e2e HTTP tests that read the body are: `test_e2e_run_persists_estimate.py`, `test_e2e_run_replay.py`, `test_quality_endpoints.py` (e2e portion), `test_data_quality.py`. Total expected churn: ~20–30 LOC of test plumbing. |
+| `POST /api/e2e/run` changing from sync to async is a breaking change to **12 test files / ~16 test functions** (not 4 as initially estimated) | The implementation plan's T6 enumerates the 12 affected files. Total expected churn: ~80–120 LOC of test plumbing (replacing `r.json()["boq_items"]` with `body["result"]["boq_items"]` via `tests/_e2e_async.post_and_wait`). Validated list: `test_data_quality.py`, `test_phase3_s101_equipment.py`, `test_phase2_regression.py`, `test_legend_gating.py`, `test_phase3_regression.py`, `test_labor_costing.py`, `test_phase4_regression.py`, `test_route_quads.py`, `test_scale_honesty.py`, `test_sheet_file_endpoint.py`, `test_source_region_persistence.py`, `test_v3_integration.py`. |
 | Polling 2 s × 60 = 120 HTTP requests in 2 min on a busy day | In-memory queue, jobs auto-expire after 5 min. 120 req/min from a single user is negligible. |
 | New `spec_code`/`loop_id` columns increase BoqItem row size by ~100 bytes | Negligible. BoqItem is already a wide table (JSON provenance, bbox, derivation). |
 | `lighting_fixture_panel.yaml` rule could be too greedy (matches non-lighting DALI CONTROL) | V1 layer isolation already filters to `DALI CONTROL` only; the rule is keyed on the same layer, so the selectivity is correct. Backed by V1's 673-symbol / 96k-path test fixture. |

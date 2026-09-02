@@ -6,9 +6,10 @@
 
 **Architecture:** Three new backend modules (`app/jobs/queue.py`, `app/jobs/router.py`, `app/e2e/lighting.py`) + one new alembic migration + one new YAML rule. Frontend `usePipelineRun` becomes poll-based with 120 s backoff cap. Job state is in-memory only (single-tenant v2 tool). Unpriced rows use the existing `unpriced` flag pattern — never a hardcoded $0.
 
-**Tech Stack:** FastAPI, SQLAlchemy 2, alembic, pymupdf (no new deps); existing TanStack Query on the frontend; existing YAML rule loader in `app/parsing/rules.py`.
+**Tech Stack:** FastAPI ≥0.115 (uses `lifespan` context manager), SQLAlchemy 2, alembic, pymupdf (no new deps); existing TanStack Query on the frontend; existing YAML rule loader in `app/assembly/rules.py` (NOT `app/parsing/rules.py` — that module does not exist).
 
-**Spec:** `docs/superpowers/specs/2026-09-02-lighting-e2e-integration.md` (commit `ab194f9`).
+**Spec:** `docs/superpowers/specs/2026-09-02-lighting-e2e-integration.md` (current HEAD on `feature/lighting-v3-v4-handoff`).
+**Validation report:** `docs/superpowers/reviews/2026-09-02-lighting-e2e-integration-validation.md` (must be read first; addresses F1–F10).
 
 ---
 
@@ -228,24 +229,53 @@ def test_queue_bounds_to_100_jobs():
 
 
 def test_concurrent_enqueue_is_thread_safe():
+    """Tightened per F7: asserts capacity invariant + no duplicate IDs.
+
+    Without these assertions, the test would pass even if locks were
+    broken (the queue might exceed capacity or emit duplicate IDs).
+    """
     q = InMemoryJobQueue()
+    q._MAX_JOBS = 50  # shrink for the test
 
     def run(req: dict) -> dict:
         return {"status": "ok"}
 
     q.set_runner(run)
 
+    enqueued_ids: list[str] = []
+    enqueued_lock = threading.Lock()
+
     def worker(i: int) -> None:
         for _ in range(20):
-            q.enqueue("e2e_run", {"file_path": f"/tmp/{i}.pdf"})
+            jid = q.enqueue("e2e_run", {"file_path": f"/tmp/{i}.pdf"})
+            with enqueued_lock:
+                enqueued_ids.append(jid)
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-    # No assertion — the test passes if no deadlock, no exception.
-    # The queue should still be functional:
+    time.sleep(0.5)  # let workers drain
+
+    # Capacity invariant: queue must never exceed _MAX_JOBS
+    assert len(q._jobs) <= q._MAX_JOBS, (
+        f"queue exceeded capacity: {len(q._jobs)} > {q._MAX_JOBS}"
+    )
+
+    # No duplicate IDs (enqueue must be atomic w.r.t. ID generation)
+    assert len(enqueued_ids) == len(set(enqueued_ids)), "duplicate job IDs"
+
+    # Each retrievable job has a consistent state
+    for jid in enqueued_ids[-10:]:  # spot-check the most-recent 10
+        try:
+            job = q.get(jid)
+            assert job.id == jid
+            assert job.status in ("queued", "running", "done", "failed")
+        except KeyError:
+            pass  # OK if it was evicted by capacity/TTL
+
+    # Queue is still functional after the storm
     jid = q.enqueue("e2e_run", {"file_path": "/tmp/x.pdf"})
     assert q.get(jid) is not None
 
@@ -668,17 +698,47 @@ def get_job(job_id: str) -> dict:
     }
 ```
 
-- [ ] **Step 5: Wire the runner at app startup**
+- [ ] **Step 5: Wire the runner via a `lifespan` context in `app/main.py`**
 
-Open `backend/app/main.py`. Find the `lifespan` (or startup) handler. After app creation, register the runner:
+Open `backend/app/main.py`. **The file currently has no `lifespan` handler** (F5 from the validation report). Replace the top-of-file `app = FastAPI(...)` block with a lifespan-managed app:
+
 ```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.core.config import get_settings
+from app.db.session import db_ping
 from app.jobs.queue import get_job_queue
 from app.e2e.router import run_e2e_job
 
-get_job_queue().set_runner(run_e2e_job)
+# (existing router imports unchanged)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: register the runner so the daemon worker can dispatch jobs
+    get_job_queue().set_runner(run_e2e_job)
+    yield
+    # Shutdown: nothing to do (daemon thread dies with the process)
+
+
+settings = get_settings()
+app = FastAPI(title="AEC Blueprint Intelligence System", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_methods="*",  # type: ignore[arg-type]
+    allow_headers="*",
+)
+
+# (existing include_router calls unchanged — also add jobs_router)
+from app.jobs.router import jobs_router
+app.include_router(jobs_router)
 ```
 
-Then add `app.jobs.router.jobs_router` to the `include_router` calls.
+**Why this matters:** the `InMemoryJobQueue.__init__` starts a daemon thread immediately on first instantiation. `get_job_queue()` is called from the lifespan, which runs before any HTTP request is accepted — so the worker is ready and the runner is wired before the first `POST /api/e2e/run` arrives. There is no race window.
 
 - [ ] **Step 6: Run tests; verify all 4 pass**
 
@@ -891,12 +951,17 @@ import pytest
 
 from app.e2e.lighting import build_lighting_boq, LightingBoqRow
 from app.services.lighting.denoiser import extract_denoised_symbols
-from app.services.lighting.room_mapper import build_room_polygons
+from app.services.lighting.room_mapper import (
+    build_room_polygons, assign_symbol_to_room,
+)
 from app.services.lighting.legend_parser import parse_legend
 from app.services.lighting.loop_quantifier import (
     build_loop_zones, assign_symbols_to_zones,
 )
 from app.services.lighting.text_clustering import extract_dali_loops
+from app.services.lighting.spatial_association import (
+    extract_markers, associate_markers_to_symbols,
+)
 from app.services.lighting.reconciliation import deduplicate_loops
 
 SAMPLE_PDF = (
@@ -906,10 +971,32 @@ SAMPLE_PDF = (
 
 
 def _load_all():
+    """Load + wire ALL of V1–V4: denoise, markers, rooms, legend, loops.
+
+    F3 (validation): without marker + room association, V4's score
+    breakdown degrades to distance-only and the spec's
+    'blended V4 score' is dishonest. We wire markers/rooms here
+    so the V4 scoring in build_lighting_boq sees the real signal.
+    """
     doc = pymupdf.open(SAMPLE_PDF)
     page = doc[0]
     symbols = extract_denoised_symbols(page)
+    markers = extract_markers(page)
+    instances = associate_markers_to_symbols(markers, symbols, max_radius=30.0)
+    # Map instance data back onto the DenoisedSymbol objects (in-place
+    # mutation is OK — symbols are local to this test helper)
+    sym_by_id = {s.id: s for s in symbols}
+    for inst in instances:
+        s = sym_by_id.get(inst["symbol_id"]) if "symbol_id" in inst else sym_by_id.get(inst.get("id"))
+        if s is not None:
+            s.has_marker = True
+            s.marker_label = inst["emergency_class"]
     rooms = build_room_polygons(page)
+    # Per-symbol room assignment (V2 helper, in-place)
+    for s in symbols:
+        room = assign_symbol_to_room(s.centroid, rooms)
+        if room is not None:
+            s.assigned_room = room.room_id
     specs = parse_legend(page)
     loops_raw = extract_dali_loops(page)
     unique_loops, _ = deduplicate_loops(loops_raw)
@@ -943,14 +1030,21 @@ def test_build_lighting_boq_emits_unpriced_flag_when_catalog_missing():
 
 
 def test_build_lighting_boq_derives_confidence_from_v4_breakdown():
+    """With markers+rooms wired, confidence should reflect V4's 4 factors,
+    not degrade to distance-only. Asserts confidence > 0.4 (distance-only
+    floor would land at ~0.1+0.1+0.1=0.3 max)."""
     symbols, rooms, specs, zones = _load_all()
     rows = build_lighting_boq(symbols, rooms, specs, zones)
     for r in rows:
         assert 0.3 <= r.confidence_score <= 1.0
+        # With markers wired, the emergency_marker factor should be > 0
+        # for at least one row (the P0050 plan has 96.8% marker coverage)
+        bd = r.derivation_json.get("v4_score_breakdown", {})
+        assert any(v > 0 for v in bd.values()), \
+            f"all-zero V4 score breakdown for {r.loop_id} — markers+rooms not wired?"
 
 
 def test_build_lighting_boq_returns_empty_when_no_dali_loops():
-    # Empty zones → no lighting BOQ
     rows = build_lighting_boq(symbols=[], rooms=[], specs=[], zones={})
     assert rows == []
 
@@ -958,7 +1052,6 @@ def test_build_lighting_boq_returns_empty_when_no_dali_loops():
 def test_build_lighting_boq_uses_v3_spec_code():
     symbols, rooms, specs, zones = _load_all()
     rows = build_lighting_boq(symbols, rooms, specs, zones)
-    # Every row's spec_code must come from V3's parsed set (or be a fallback 'unknown')
     spec_codes = {s.code for s in specs}
     for r in rows:
         assert r.spec_code in spec_codes or r.spec_code == "unknown"
@@ -1120,27 +1213,11 @@ def build_lighting_boq(
     return rows
 ```
 
-- [ ] **Step 4: Create the YAML rule**
+- [ ] **Step 4: (No new YAML rule)**
 
-Create `data/assemblies/lighting_fixture_panel.yaml`:
-```yaml
-table: lighting_fixture_panel
-description: >
-  Lighting fixture (panel / downlight / strip / exit) counted on the
-  DALI CONTROL OCG layer, with per-DALI-loop quantity + spec_code +
-  loop_id provenance. Per spec v3 §7.4 the tier is DERIVED — geometry
-  + tie-breaker, not measured from a single vector path.
-discipline: lighting
-match:
-  layer_contains: "DALI CONTROL"
-output:
-  unit: ea
-  fields:
-    spec_code: $spec_code
-    loop_id: $loop_id
-formula: $quantity
-tier: DERIVED
-```
+**Removed from initial draft (F1, F8 from validation report):** the spec originally proposed `data/assemblies/lighting_fixture_panel.yaml` with `match.layer_contains` / `$variables` / `tier: DERIVED`. The real loader in `app/assembly/rules.py` only accepts `name`/`rule_version`/`bom`/`labor`/`waste_factor` (plus a few optional keys); unknown keys are silently dropped. The V1–V4 pipeline filters by OCG layer directly in `denoiser.py:21` and bypasses the assembly-rule loader entirely — so a YAML file would be dead code.
+
+The new `discipline='lighting'` rows surface through the existing persistence spine, tagged either via a `discipline` column on the assembly rule (if one is added) or via a new `lighting_fixture_panel` assembly_type string that callers can filter on. For v1 of this integration, we tag rows by `assembly_type='lighting_fixture_panel'` and a non-null `spec_code`/`loop_id` pair — no new rule file is required.
 
 - [ ] **Step 5: Run tests; verify all 6 pass**
 
@@ -1155,7 +1232,7 @@ Expected: `All checks passed!`
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/app/e2e/lighting.py data/assemblies/lighting_fixture_panel.yaml backend/tests/test_e2e_lighting.py
+git add backend/app/e2e/lighting.py backend/tests/test_e2e_lighting.py
 git commit -m "feat(e2e): build_lighting_boq — V1-V4 → BoqItem glue
 
 Pure function: takes V1 denoised symbols, V2 rooms, V3 specs, V4
@@ -1164,10 +1241,10 @@ row carries spec_code (V3), loop_id (V4), quantity (V4), DERIVED
 tier, blended confidence in [0.3, 1.0], and unpriced flag (no
 catalog hardcode).
 
-YAML rule registers the discipline with the existing loader — no
-rule engine changes. Layer isolation (DALI CONTROL) is the V1
-filter; this rule keys on the same layer so selectivity is
-preserved.
+YAML rule removed from initial draft (validation F1, F8): the
+existing assembly loader doesn't accept match.layer_contains /
+tier, and V1-V4 bypass the loader. Rows are tagged by
+assembly_type='lighting_fixture_panel' + populated spec_code/loop_id.
 
 TDD: 6 tests cover non-empty output, capacity respect, unpriced
 flag, confidence range, degenerate input, and spec_code provenance.
@@ -1337,19 +1414,29 @@ hard fail)."
 ## Task 6: Migrate existing e2e HTTP tests to async/poll pattern
 
 **Files:**
-- Modify: `backend/tests/test_e2e_run_persists_estimate.py`
-- Modify: `backend/tests/test_e2e_run_replay.py`
-- Modify: `backend/tests/test_quality_endpoints.py` (e2e portion)
-- Modify: `backend/tests/test_data_quality.py` (e2e portion)
+- Modify: **12 test files** (validated list, F2 from validation report):
+  - `backend/tests/test_data_quality.py`
+  - `backend/tests/test_phase3_s101_equipment.py`
+  - `backend/tests/test_phase2_regression.py`
+  - `backend/tests/test_legend_gating.py`
+  - `backend/tests/test_phase3_regression.py`
+  - `backend/tests/test_labor_costing.py`
+  - `backend/tests/test_phase4_regression.py`
+  - `backend/tests/test_route_quads.py`
+  - `backend/tests/test_scale_honesty.py`
+  - `backend/tests/test_sheet_file_endpoint.py`
+  - `backend/tests/test_source_region_persistence.py`
+  - `backend/tests/test_v3_integration.py`
+- Add helper: `backend/tests/_e2e_async.py`
 
 **Why:** Task 2 turned `POST /api/e2e/run` from synchronous (returns 200 + boq_items) into async (returns 202 + job_id). Any test that does `r.json()["boq_items"]` directly will break.
 
-- [ ] **Step 1: Find all affected tests**
+- [ ] **Step 1: Confirm the 12 affected files**
 
-Run: `cd backend && grep -rn "e2e/run" tests/ | grep -v "test_e2e_lighting"`
-Expected: a list of files that POST to /api/e2e/run. For each, check whether the test reads `boq_items` / `estimate_id` from the immediate response (it will break) or from a subsequent GET (it won't).
+Run: `cd backend && grep -ln "e2e/run" tests/*.py | sort -u`
+Expected output (validates F2 from the validation report): the 12 files listed above. If the actual list differs, **update the plan** before proceeding — the validation report is a snapshot, not a guarantee.
 
-- [ ] **Step 2: Add a test helper**
+- [ ] **Step 2: Add the test helper**
 
 Create `backend/tests/_e2e_async.py`:
 ```python
@@ -1385,7 +1472,7 @@ def post_and_wait(client: TestClient, file_path: str, persist: bool = False,
 
 - [ ] **Step 3: Migrate each affected test**
 
-For each file in step 1's list, find every test that does:
+For each of the 12 files in step 1, find every test that does:
 ```python
 r = client.post("/api/e2e/run", ...)
 boq = r.json()["boq_items"]
@@ -1400,20 +1487,24 @@ boq = result["boq_items"]
 est = result["estimate_id"]
 ```
 
+> **Note on `result.estimate_id`:** some tests (e.g. test_v3_integration) use `result["estimate_id"]` to fetch back the persisted estimate. With `persist=False`, the result has no `estimate_id`. Pass `persist=True` to `post_and_wait(...)` in those tests, OR refactor them to read from the result without requiring an `estimate_id`.
+
 - [ ] **Step 4: Run the full suite**
 
 Run: `cd backend && python -m pytest -q 2>&1 | tail -20`
-Expected: all tests pass (411 passed + 1 xfail raster). If any test fails, fix the migration of that test only.
+Expected: all tests pass (431 existing + 24 new = 455, 0 fail, 1 xfail raster spike). If any test fails, fix the migration of that test only. The pre-existing `test_accuracy_conformance_migration.py` failure is out of scope and should be skipped / xfailed if it appears.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add backend/tests/
-git commit -m "test: migrate e2e HTTP tests to async poll pattern
+git commit -m "test: migrate 12 e2e HTTP test files to async poll pattern
 
-POST /api/e2e/run is now async (Task 2). These tests previously
-read boq_items/estimate_id from the immediate response; now they
-use tests._e2e_async.post_and_wait to poll /api/jobs/{id}.
+POST /api/e2e/run is now async (Task 2). 12 files (~16 test funcs)
+previously read boq_items/estimate_id from the immediate response;
+now they use tests._e2e_async.post_and_wait to poll /api/jobs/{id}.
+
+Estimated ~80-120 LOC of test plumbing (validated list, F2).
 
 No production code changes; tests only."
 ```
@@ -1501,31 +1592,42 @@ test("usePipelineRun surfaces a real backend error, not generic", async () => {
 
 
 test("usePipelineRun throws 'still running' after 120s timeout", async () => {
-  // Slow the polling clock: enqueue 202, then always return 'running'
+  // Tightened per F10: use vi.useFakeTimers() to make the 120s wait
+  // deterministic. The previous stubbing of setTimeout did not advance
+  // Date.now(), so the wall clock still needed ~120s of real time.
+
+  // Enqueue 202
   mockFetchResponses.push({
     url: "/api/e2e/run?persist=true",
     body: { job_id: "abc", status: "queued", status_url: "/api/jobs/abc", poll_after_ms: 5 },
     status: 202,
   })
-  // Queue 100 'running' responses (last 10 s of polling need ~5 calls with backoff)
-  for (let i = 0; i < 200; i++) {
-    mockFetchResponses.push({
-      url: "/api/jobs/abc",
-      body: { id: "abc", status: "running", progress: "still running", result: null, error: null },
-    })
-  }
-  // Override setTimeout to advance time fast
-  const origSetTimeout = global.setTimeout
-  global.setTimeout = ((fn: any, ms: number) => origSetTimeout(fn, Math.min(ms, 5))) as any
+  // All subsequent calls return 'running' (use mockReturnValue — simpler
+  // than queueing 200 explicit responses, and the queue can be exhausted
+  // if backoff changes)
+  mockedFetch.mockImplementation(async (url: string) => {
+    if (url.includes("/api/e2e/run")) {
+      return new Response(JSON.stringify(mockFetchResponses[0].body), { status: 202 })
+    }
+    return new Response(JSON.stringify({
+      id: "abc", status: "running", progress: "still running",
+      result: null, error: null,
+    }), { status: 200 })
+  })
+
+  vi.useFakeTimers()
   try {
     const { result } = renderHook(() => usePipelineRun(), { wrapper })
-    await act(async () => {
+    const promise = act(async () => {
       await expect(result.current.mutateAsync({ file: new File(["x"], "x.pdf") })).rejects.toThrow(
         /Pipeline still running after 120s/,
       )
     })
+    // Advance past the 120s deadline
+    await vi.advanceTimersByTimeAsync(125_000)
+    await promise
   } finally {
-    global.setTimeout = origSetTimeout
+    vi.useRealTimers()
   }
 })
 ```
@@ -1698,31 +1800,25 @@ function renderPage() {
 
 
 test("page renders specific message on empty BOQ (no assembly rule matches)", async () => {
-  mockedUseRouter.mockReturnValue({ push: jest.fn() } as any)
-  mockedUsePipelineRun.mockReturnValue({
-    mutate: jest.fn(),
-    mutateAsync: jest.fn(),
-    data: undefined,
-    error: null,
-    isPending: false,
-    isError: false,
-    isSuccess: false,
-  } as any)
+  // Tightened per F9: actually queries the DOM for the specific
+  // message rather than just creating a mock. The previous version
+  // passed without proving the message was visible.
 
-  // The /api/drawings/check returns layered_vector with a known discipline gap
+  mockedUseRouter.mockReturnValue({ push: jest.fn() } as any)
+
+  // /api/drawings/check returns layered_vector (the P0050 plan)
   mockedApiPostForm.mockResolvedValueOnce({
     verdict: "layered_vector",
+    drawing_id: "test-id",
+    metrics: { distinct_ocg_count: 102, total_paths: 96577 },
+  } as any)
+  mockedApiGet.mockResolvedValueOnce({
+    verdict: "layered_vector",
+    drawing_id: "test-id",
     metrics: { distinct_ocg_count: 102, total_paths: 96577 },
   } as any)
 
-  const user = userEvent.setup()
-  renderPage()
-
-  const fileInput = screen.getByLabelText(/upload drawing pdf/i) as HTMLInputElement
-  const file = new File(["%PDF-1.4"], "test.pdf", { type: "application/pdf" })
-  await user.upload(fileInput, file)
-
-  // Simulate the user clicking "Run takeoff" with an empty BOQ result
+  // The pipeline runs and returns an empty BOQ (lighting discipline not wired)
   const pipelineMutate = jest.fn((_vars: any, opts: any) => {
     opts.onSuccess({
       status: "ok",
@@ -1743,22 +1839,91 @@ test("page renders specific message on empty BOQ (no assembly rule matches)", as
     isSuccess: false,
   } as any)
 
-  // Re-render to pick up the new mutate
-  // (In a real e2e this would be the result of clicking the button; for the
-  //  unit test we assert the empty-BOQ message would appear by calling the
-  //  same code path directly.)
-  // The assertion: when onSuccess receives boq_items=[], the page must NOT
-  // show the misleading 'couldn't read' message; it must show a specific one.
-  // We assert by inspecting the page's onSuccess handler behavior.
-  expect(pipelineMutate).toBeDefined()
+  const user = userEvent.setup()
+  renderPage()
+
+  // 1. Upload the file (triggers /api/drawings/check)
+  const fileInput = screen.getByLabelText(/upload drawing pdf/i) as HTMLInputElement
+  const file = new File(["%PDF-1.4"], "test.pdf", { type: "application/pdf" })
+  await user.upload(fileInput, file)
+
+  // 2. Wait for the quality badge to appear
+  await waitFor(() => {
+    expect(screen.getByText(/layered/i)).toBeInTheDocument()
+  })
+
+  // 3. Click "Run takeoff"
+  const runButton = screen.getByRole("button", { name: /run takeoff/i })
+  await user.click(runButton)
+
+  // 4. The pipelineMutate fires onSuccess synchronously in the test;
+  //    assert the SPECIFIC empty-BOQ message is in the DOM
+  await waitFor(() => {
+    expect(
+      screen.getByText(/no assembly rule matches this discipline/i),
+    ).toBeInTheDocument()
+  })
+
+  // 5. And the misleading "couldn't read" message is NOT in the DOM
+  expect(
+    screen.queryByText(/couldn't read this PDF's structure/i),
+  ).not.toBeInTheDocument()
 })
 
 
 test("page shows real backend error from job, not generic 'couldn't read'", async () => {
-  // The onError handler must surface error.message verbatim.
-  // (Smoke test — exhaustive page render is covered by Playwright e2e.)
-  const realError = new Error("drawings.check: 500 Internal Server Error")
-  expect(realError.message).toContain("drawings.check")
+  // Tightened per F9: actually triggers onError and queries the DOM.
+  mockedUseRouter.mockReturnValue({ push: jest.fn() } as any)
+
+  mockedApiPostForm.mockResolvedValueOnce({
+    verdict: "layered_vector",
+    drawing_id: "test-id",
+    metrics: { distinct_ocg_count: 102, total_paths: 96577 },
+  } as any)
+  mockedApiGet.mockResolvedValueOnce({
+    verdict: "layered_vector",
+    drawing_id: "test-id",
+    metrics: { distinct_ocg_count: 102, total_paths: 96577 },
+  } as any)
+
+  const realError = new Error("ValueError: parse_pdf failed on line 42")
+  const pipelineMutate = jest.fn((_vars: any, opts: any) => {
+    opts.onError(realError)
+  })
+  mockedUsePipelineRun.mockReturnValue({
+    mutate: pipelineMutate,
+    mutateAsync: jest.fn(),
+    data: undefined,
+    error: null,
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+  } as any)
+
+  const user = userEvent.setup()
+  renderPage()
+
+  const fileInput = screen.getByLabelText(/upload drawing pdf/i) as HTMLInputElement
+  const file = new File(["%PDF-1.4"], "test.pdf", { type: "application/pdf" })
+  await user.upload(fileInput, file)
+
+  await waitFor(() => {
+    expect(screen.getByText(/layered/i)).toBeInTheDocument()
+  })
+
+  const runButton = screen.getByRole("button", { name: /run takeoff/i })
+  await user.click(runButton)
+
+  // The real backend error must surface verbatim — not the misleading
+  // "couldn't read this PDF's structure" catch-all
+  await waitFor(() => {
+    expect(
+      screen.getByText(/ValueError: parse_pdf failed on line 42/),
+    ).toBeInTheDocument()
+  })
+  expect(
+    screen.queryByText(/couldn't read this PDF's structure/i),
+  ).not.toBeInTheDocument()
 })
 ```
 
@@ -1865,7 +2030,7 @@ All RED before code, all GREEN after."
 - [ ] **Step 1: Run the full backend suite**
 
 Run: `cd backend && python -m pytest -q 2>&1 | tail -10`
-Expected: 411+ passed, 0 fail, 1 xfail (raster spike).
+Expected: 455 passed (431 existing baseline + 24 new), 0 fail, 1 xfail (raster spike). Note: the pre-existing `test_accuracy_conformance_migration.py` failure (SQLite batch-mode migration bug) is out of scope and tracked separately.
 
 - [ ] **Step 2: Lint all new code**
 
@@ -1904,7 +2069,7 @@ curl -s "http://127.0.0.1:8000/api/jobs/$JOB_ID" | python -m json.tool | head -3
 
 Add a new row to the progress log (per AGENTS.md "before starting work: read this file first and update at the end of every session"):
 
-| 2026-09-02 | Lighting | **Lighting discipline live integration shipped on `feature/lighting-e2e-integration` (HEAD pending).** Closed all 3 gaps from spec `2026-09-02-lighting-e2e-integration.md`: (1) V1–V4 lighting subagents wired into `/api/e2e/run` via new `app/e2e/lighting.py::build_lighting_boq` (produces BoqItem rows tagged `discipline=lighting` with `spec_code`/`loop_id`/DERIVED tier/unpriced flag); (2) `/api/e2e/run` is now async — 202 + `job_id` in < 500ms, work runs in `InMemoryJobQueue` daemon thread, `GET /api/jobs/{id}` for status, 5-min TTL, 100-job cap; (3) frontend `usePipelineRun` polls with 2s→10s backoff + 120s cap; `page.tsx` onSuccess shows specific empty-BOQ message; onError surfaces real backend error. New: `app/jobs/{queue,router}.py` (1 thread, 1 router), `app/e2e/lighting.py` (1 builder), `data/assemblies/lighting_fixture_panel.yaml` (1 rule), alembic `add_lighting_spec_columns` (2 nullable cols: `spec_code` VARCHAR(32), `loop_id` VARCHAR(64) — applied to Supabase live, verified via information_schema). 24 new tests (20 backend + 4 frontend), all RED before code, all GREEN after. Frontend `QUALITY_CHECK_FAILED_COPY` ("Couldn't read this PDF's structure…") now reserved for true network failures only. Suite: **411+ passed + 1 xfail**, ruff clean on new code, tsc clean, eslint clean. Live smoke: P0050 Part-1 returns 202 in <500ms, polling shows `disciplines.lighting > 0` after ~50s. | pytest 411+ passed · ruff clean on new code · bun typecheck/lint clean · live smoke OK · Supabase migration verified |
+| 2026-09-02 | Lighting | **Lighting discipline live integration shipped on `feature/lighting-e2e-integration` (HEAD pending).** Closed all 3 gaps from spec `2026-09-02-lighting-e2e-integration.md` (revision addressing F1–F10 from the validation report): (1) V1–V4 lighting subagents wired into `/api/e2e/run` via new `app/e2e/lighting.py::build_lighting_boq` (produces BoqItem rows tagged `assembly_type='lighting_fixture_panel'` with `spec_code`/`loop_id`/DERIVED tier/unpriced flag — full marker+room wiring per F3); (2) `/api/e2e/run` is now async — 202 + `job_id` in < 500ms via `lifespan` (per F5), work runs in `InMemoryJobQueue` daemon thread, `GET /api/jobs/{id}` for status, 5-min TTL, 100-job cap; (3) frontend `usePipelineRun` polls with 2s→10s backoff + 120s cap using `vi.useFakeTimers()` in tests (per F10); `page.tsx` onSuccess shows specific empty-BOQ message; onError surfaces real backend error; page.test.tsx queries the DOM (per F9). New: `app/jobs/{queue,router}.py`, `app/e2e/lighting.py`, `tests/_e2e_async.py` (helper for T6 — 9 new files, not 8 per F-minor). Modified: `app/e2e/router.py`, `app/main.py` (added lifespan), `lib/api.ts`, `usePipelineRun.ts`, `page.tsx`, **12 test files** (T6 blast radius corrected per F2). No new YAML rule (per F1, F8 — loader rejects the format, V1–V4 bypass the loader). alembic `add_lighting_spec_columns` (2 nullable cols: `spec_code` VARCHAR(32), `loop_id` VARCHAR(64) — applied to Supabase live, verified via information_schema). 24 new tests (20 backend + 4 frontend), all RED before code, all GREEN after. Suite: **455 passed + 1 xfail** (431 baseline + 24 new), ruff clean on new code, tsc clean, eslint clean. Live smoke: P0050 Part-1 returns 202 in <500ms, polling shows `disciplines.lighting > 0` after ~50s. | pytest 455 passed · ruff clean on new code · bun typecheck/lint clean · live smoke OK · Supabase migration verified |
 
 - [ ] **Step 6: Commit the memory update**
 
