@@ -55,6 +55,8 @@ class BoqItem(Base):
     # (T3-review ruling); NULL on legacy rows, payload falls back to the
     # measurement row status.
     confidence_score: Mapped[float | None] = mapped_column(default=None)
+    spec_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    loop_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
     measurement: Mapped[Measurement] = relationship(back_populates="boq_items")
     estimate: Mapped["Estimate"] = relationship(back_populates="boq_items")
