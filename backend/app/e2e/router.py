@@ -1,34 +1,11 @@
 """E2E pipeline endpoint — PDF upload → BOQ.
 
-Exposes ``POST /api/e2e/run`` which runs the full vector pipeline:
+Exposes ``POST /api/e2e/run`` which enqueues the full vector pipeline for async
+processing and returns 202 + job_id in <500ms. The actual pipeline runs in a
+background worker; results are polled via ``GET /api/jobs/{job_id}``.
 
-1. ``classify_upload`` → decides vector/raster
-2. ``parse_pdf`` → extract drawings, text spans, build OCG registry
-3. ``resolve_scale`` → read scale from title block (or stamp assumed 1:100)
-4. ``measure_routes`` → CONDUIT / CABLE_TRAY lengths at detected scale
-5. ``count_components`` → discrete symbols (lighting, switches, trays, …);
-   clusters on OCG layers that map to no assembly rule are surfaced as
-   UNMAPPED entries (never priced) per spec v3 §7.9, and legend/title-block
-   gating flags annotation glyphs + legend-undeclared types as REVIEW
-   (never priced, never silently dropped)
-6. ``apply_assembly`` → per‑component BOM & labor hours from YAML rules
-7. ``compute_boq_item`` → catalog price lookup, ``unpriced`` flag, total cost
-
-A full ``SheetExtraction`` bundle (classified layers, detected legend/schedule
-blocks, text–layer annotations, routes/components incl. UNMAPPED) is built on
-every run; when ``persist=true`` it is written through the persistence spine
-and the response carries an ``estimate_id`` replayable via
-``GET /api/estimates/{id}/replay``.
-
-Returns BOQ items with ``confidence_status`` (DERIVED/ASSUMED at BOQ level —
-rows stay MEASURED) and ``source_path_ids`` for frontend click‑through.
-
-Trap compliance:
-- No price is hardcoded in source. If the catalog has no price, the item is
-  flagged ``unpriced`` (never $0 substitution) for human review.
-- Layer→assembly resolution is YAML‑driven (``data/layer_mapping.yaml``).
-- Unmapped measured elements are surfaced and persisted as UNMAPPED — never
-  priced (spec v3 §7.9).
+Synchronous pipeline logic is factored into ``e2e_run_body`` and invoked by the
+job queue's runner (``run_e2e_job``).
 """
 
 from __future__ import annotations
@@ -41,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import pymupdf  # MUST import pymupdf, never fitz
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session as OrmSession
 
 from app.core.config import get_settings
@@ -80,6 +57,7 @@ from app.assembly.formulas import FormulaValidationError
 from app.assembly.rules import apply_assembly, load_assembly_rule
 from app.catalog.prices import compute_boq_item, compute_labor_cost
 from app.common.normalize import source_region
+from app.jobs.queue import get_job_queue
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -88,6 +66,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/e2e", tags=["e2e"])
+
+# Maximum file size (50 MB)
+MAX_FILE_SIZE = 50 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -494,354 +475,426 @@ def resolve_route_context(
 
 
 # ---------------------------------------------------------------------------
-# Endpoint
+# Core pipeline body (called by job worker via run_e2e_job)
+# ---------------------------------------------------------------------------
+def e2e_run_body(
+    file_path: str,
+    persist: bool,
+    project_id: Optional[uuid.UUID],
+    original_filename: str = "",
+) -> Dict[str, Any]:
+    """The actual e2e pipeline; called by the job worker.
+
+    Args:
+        file_path: Path to the temporary PDF file.
+        persist: Whether to persist the extraction to the database.
+        project_id: Optional project UUID for persistence.
+        original_filename: Original uploaded filename (for sheet_name).
+
+    Returns:
+        The same response dict the synchronous endpoint used to return.
+    """
+    dq = DataQuality()
+
+    # 1️⃣ Classify
+    try:
+        classify_result = classify_upload(file_path)
+    except Exception:
+        dq.classifier_errors += 1
+        logger.exception(
+            "classify_upload failed; degrading upload to the raster path"
+        )
+        classify_result = {"status": "raster"}
+
+    if classify_result.get("status") != "vector":
+        # Raster path: no parsed text spans exist, so the run carries the
+        # explicit assumed-scale stamp (spec v3 §7.4) like every vector run.
+        assumed = resolve_scale([])
+        return {
+            "status": "raster",
+            "detail": "PDF classified as raster; vector pipeline skipped.",
+            "scale": {"value": assumed.scale_str, "status": assumed.status},
+            "data_quality": dq.as_dict(),
+        }
+
+    source_quality = classify_result.get("source_quality", "layered_vector")
+
+    # 2️⃣ Parse PDF
+    parsed = parse_pdf(file_path)
+    scale_res = resolve_scale(parsed.get("raw_text_spans", []))
+    scale = scale_res.scale_str
+    # Assumed-scale honesty: when no parseable scale token exists, every
+    # length-driven BOQ line downgrades to ASSUMED (spec v3 §7.4/§7.12).
+    scale_status = scale_res.status
+    clusters = parsed.get("clusters", [])
+    raw_drawings = parsed.get("raw_drawings", [])
+    cascade_spans = _adapt_spans_for_cascade(parsed.get("raw_text_spans", []))
+    schedule_rows = detect_schedule_rows(cascade_spans)
+
+    # 3️⃣ Measure routes (length-based assemblies: tray, conduit, ducts, pipes)
+    route_layer_names = tuple(route_layers())
+    route_stats: Dict[str, int] = {}
+    routes = measure_routes(
+        _route_layer_clusters(raw_drawings, scale),
+        raw_drawings,
+        scale,
+        route_layer_names,
+        stats=route_stats,
+    )
+    dq.degenerate_skipped += route_stats.get("degenerate_skipped", 0)
+    # Resolved cross-section sizes aligned with `routes` by index —
+    # reused when projecting a SheetExtraction for persistence.
+    route_sizes: List[Dict | None] = [None] * len(routes)
+
+    # 4️⃣ Count discrete components (symbol-based assemblies). Clusters on
+    # OCG layers that map to no rule are surfaced as UNMAPPED entries —
+    # reported and persisted, never priced (spec v3 §7.9).
+    unmapped_clusters = _unmapped_layer_clusters(
+        parsed.get("ocg_registry") or {}, raw_drawings, scale_res.denominator
+    )
+    all_components = count_components(
+        clusters + unmapped_clusters, raw_drawings, include_unmapped=True
+    )
+    components = [c for c in all_components if c["assembly_type"] is not None]
+    unmapped_components = [c for c in all_components if c["assembly_type"] is None]
+    dq.unmapped_count += len(unmapped_components)
+
+    # 4½ Legend/title-block gating: annotation glyphs (legend cells,
+    # title-block linework) and types absent from a readable sheet legend
+    # are flagged for human review — surfaced in the response, persisted
+    # as REVIEW components, NEVER priced or silently dropped.
+    schedule_blocks = detect_blocks(cascade_spans)
+    regions = detect_title_block_regions(cascade_spans)
+    allowed = legend_allowed_assemblies(schedule_blocks)
+    components, flagged_symbols = gate_components(components, regions, allowed)
+    for gate_reason in (f.get("gate_reason") for f in flagged_symbols):
+        if gate_reason == "title_block_region":
+            dq.title_block_excluded += 1
+        elif gate_reason == "not_in_legend":
+            dq.legend_gate_excluded += 1
+    # Extraction order: mapped, then legend-gated REVIEW, then UNMAPPED
+    # appended — text annotation component_index values refer into this
+    # combined list.
+    extraction_components = components + flagged_symbols + unmapped_components
+
+    # 5️⃣ Apply assembly rules & compute BOQ
+    boq_items: List[Dict[str, Any]] = []
+    with OrmSession(get_engine()) as db:
+        # Route BOQ: quantity scales with measured length
+        # Routes must ONLY evaluate against route-based assembly rules
+        for route_index, route in enumerate(routes):
+            layer = route.get("layer", "")
+            resolved_assembly = layer_to_assembly(layer)
+            # Use resolved layer assembly if available, fall back to route type
+            assembly_type = resolved_assembly if resolved_assembly else route.get("type", "")
+            if assembly_type not in ROUTE_ASSEMBLIES:
+                dq.dropped_routes += 1
+                continue
+
+            variables = None
+            size_source = None
+            if assembly_type in SIZED_ASSEMBLIES:
+                fu_stats: Dict[str, int] = {}
+                ctx = resolve_route_context(
+                    assembly_type, route, cascade_spans, scale,
+                    schedule_rows, extraction_components, routes,
+                    route_index, settings=get_settings(), stats=fu_stats,
+                )
+                dq.fu_corridor_excluded += fu_stats.get("fu_corridor_excluded", 0)
+                if ctx is None:
+                    dq.dropped_routes += 1
+                    logger.warning(
+                        "dropping %s route (%.3f m): no resolvable "
+                        "cross-section size and no configured default",
+                        assembly_type, route["length_m"],
+                    )
+                    continue
+                variables, size_source, resolved_size = ctx
+                # Persist the EFFECTIVE tier exactly as before the
+                # refactor; FU provenance rides along inside size.
+                route_sizes[route_index] = {**resolved_size, "source": size_source}
+
+            # Fail-closed like persistence: one broken rule drops that
+            # route with a warning — it must never 500 the whole run
+            # (fix-wave F6).
+            try:
+                applied = apply_assembly(assembly_type, variables=variables)
+            except FormulaValidationError as exc:
+                dq.dropped_routes += 1
+                logger.warning(
+                    "dropping %s route (%.3f m): assembly rule failed (%s)",
+                    assembly_type,
+                    route["length_m"],
+                    exc,
+                )
+                continue
+            for mat in applied.get("materials", []):
+                quantity = mat["quantity"]
+                # Legacy electrical path (variables=None): constants are
+                # per-unit-length multipliers scaled here. Mechanical
+                # rules with bound variables already scale their constant
+                # lines by length_m inside rules.py — scaling again would
+                # square every fitting length (0.2 * L^2).
+                if variables is None and "formula" not in (
+                    mat.get("derivation") or {}
+                ):
+                    quantity *= route["length_m"]
+                boq_items.append(
+                    _boq_line(
+                        assembly_type,
+                        mat["material_name"],
+                        quantity,
+                        route.get("confidence_status", "MEASURED"),
+                        route.get("source_path_ids", []),
+                        db,
+                        source_quality=source_quality,
+                        derivation=mat.get("derivation"),
+                        size_source=size_source,
+                        rule_version=applied.get("rule_version"),
+                        scale_assumed=(scale_status == "assumed"),
+                        source=source_region(
+                            route.get("page"), route.get("bbox")
+                        ),
+                    )
+                )
+            # One extra BOQ line per rule-with-labor (spec v3 §7.14) —
+            # same tier treatment as the material lines above.
+            labor_payload = labor_line_payload(
+                load_assembly_rule(assembly_type),
+                assembly_type,
+                applied,
+                applied.get("rule_version"),
+            )
+            if labor_payload is not None:
+                boq_items.append(
+                    _boq_line(
+                        assembly_type,
+                        labor_payload["material_name"],
+                        float(applied.get("labor_hours") or 0.0),
+                        route.get("confidence_status", "MEASURED"),
+                        route.get("source_path_ids", []),
+                        db,
+                        source_quality=source_quality,
+                        size_source=size_source,
+                        rule_version=applied.get("rule_version"),
+                        scale_assumed=(scale_status == "assumed"),
+                        source=source_region(
+                            route.get("page"), route.get("bbox")
+                        ),
+                        labor_payload=labor_payload,
+                    )
+                )
+
+        # Component BOQ: one assembly instance per counted symbol
+        # Enforce strict 1-to-1 layer-to-assembly matching (Phase 2 rule).
+        for comp in components:
+            resolved_type = comp.get("assembly_type")
+
+            # Sized route assemblies are quantified by the ROUTE loop
+            # (formula needs per-route size variables); a duct/pipe
+            # cluster surfacing here is geometry, not a countable symbol.
+            if resolved_type in SIZED_ASSEMBLIES:
+                dq.dropped_symbols += 1
+                continue
+
+            rule = load_assembly_rule(resolved_type)
+            if rule is None or resolved_type != rule.get("name", resolved_type):
+                # STRICT SKIP: never apply an unrelated rule to a component
+                dq.dropped_symbols += 1
+                continue
+
+            # Fail-closed like persistence: one broken rule drops that
+            # symbol type with a warning — never a 500 (fix-wave F6).
+            try:
+                applied = apply_assembly(resolved_type)
+            except FormulaValidationError as exc:
+                dq.dropped_symbols += 1
+                logger.warning(
+                    "dropping %s symbols (count path): assembly rule "
+                    "failed (%s)",
+                    resolved_type,
+                    exc,
+                )
+                continue
+            for mat in applied.get("materials", []):
+                quantity = mat["quantity"] * comp["count"]
+                boq_items.append(
+                    _boq_line(
+                        resolved_type,
+                        mat["material_name"],
+                        quantity,
+                        comp.get("confidence_status", "MEASURED"),
+                        comp.get("source_path_ids", []),
+                        db,
+                        source_quality=source_quality,
+                        derivation=mat.get("derivation"),
+                        size_source=None,
+                        rule_version=rule.get("rule_version"),
+                        source=source_region(
+                            comp.get("page"), comp.get("bbox")
+                        ),
+                    )
+                )
+            # One extra labor line per counted instance, scaled by the
+            # cluster count exactly like the material lines (spec v3
+            # §7.14); persistence aggregates the same hours per type.
+            labor_payload = labor_line_payload(
+                rule, resolved_type, applied, rule.get("rule_version")
+            )
+            if labor_payload is not None:
+                boq_items.append(
+                    _boq_line(
+                        resolved_type,
+                        labor_payload["material_name"],
+                        float(applied.get("labor_hours") or 0.0) * comp["count"],
+                        comp.get("confidence_status", "MEASURED"),
+                        comp.get("source_path_ids", []),
+                        db,
+                        source_quality=source_quality,
+                        size_source=None,
+                        rule_version=rule.get("rule_version"),
+                        source=source_region(
+                            comp.get("page"), comp.get("bbox")
+                        ),
+                        labor_payload=labor_payload,
+                    )
+                )
+
+    # Full SheetExtraction bundle — built AFTER the BOQ loop so
+    # route_sizes carries every cascade-resolved cross-section: the
+    # persisted rows must reflect exactly the provenance that drove the
+    # response math, never re-derived defaults (F1).
+    sheet_name = os.path.splitext(original_filename)[0] or None
+    extraction = _build_sheet_extraction(
+        sheet_name=sheet_name,
+        scale=scale,
+        scale_status=scale_res.status,
+        scale_str=scale_res.scale_str,
+        source_quality=source_quality,
+        routes=routes,
+        route_sizes=route_sizes,
+        components=extraction_components,
+        ocg_registry=parsed.get("ocg_registry") or {},
+        cascade_spans=cascade_spans,
+        raw_text_spans=parsed.get("raw_text_spans", []),
+        pdf_path=file_path,
+        data_quality=dq.as_dict(),
+        schedule_blocks=schedule_blocks,
+    )
+
+    # Optional persistence (default-off): write the full extraction
+    # bundle through the persistence spine in its own committing session.
+    estimate_id: uuid.UUID | None = None
+    if persist:
+        # Capture the exact uploaded bytes BEFORE the finally-unlink
+        # removes the temp copy — the stored artifact must be the file
+        # that was uploaded, byte for byte.
+        pdf_bytes = Path(file_path).read_bytes()
+        with OrmSession(get_engine()) as persist_db:
+            estimate_id = persist_extraction(
+                persist_db, project_id, extraction, pdf_bytes=pdf_bytes
+            )
+
+    response: Dict[str, Any] = {
+        "status": "ok",
+        "scale": {"value": scale_res.scale_str, "status": scale_res.status},
+        "routes_measured": len(routes),
+        "components_found": len(components),
+        "boq_items": boq_items,
+        "layers_count": len(extraction.layers),
+        "schedule_blocks_count": len(extraction.schedule_blocks),
+        "text_annotations_count": len(extraction.text_annotations),
+        "unmapped_items": _aggregate_unmapped(unmapped_components),
+        "flagged_symbols": aggregate_flagged(flagged_symbols),
+        "data_quality": dq.as_dict(),
+    }
+    if persist and estimate_id is not None:
+        response["estimate_id"] = str(estimate_id)
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Runner function invoked by the job queue
+# ---------------------------------------------------------------------------
+def run_e2e_job(request: dict) -> dict:
+    """Entry point for the job queue worker.
+
+    Unpacks the request dict (file_path, persist, project_id, original_filename)
+    and calls e2e_run_body. Exceptions propagate to the worker for failure
+    handling.
+    """
+    file_path = request["file_path"]
+    persist = request.get("persist", False)
+    project_id = request.get("project_id")
+    original_filename = request.get("original_filename", "")
+
+    if project_id is not None and isinstance(project_id, str):
+        project_id = uuid.UUID(project_id)
+
+    return e2e_run_body(file_path, persist, project_id, original_filename)
+
+
+# ---------------------------------------------------------------------------
+# Fast enqueue endpoint (returns 202 + job_id)
 # ---------------------------------------------------------------------------
 @router.post(
     "/run",
-    summary="Run the full E2E vector pipeline on an uploaded PDF",
+    summary="Enqueue the full E2E vector pipeline for async processing",
+    status_code=202,
 )
-def e2e_run(
-    file: UploadFile = File(...,
-        description="PDF file to process (vector preferred)."),
+async def e2e_run_enqueue(
+    file: UploadFile = File(..., description="PDF file to process (vector preferred)."),
     persist: bool = False,
     project_id: uuid.UUID | None = None,
 ) -> Dict[str, Any]:
-    """Run the complete PDF → BOQ pipeline and return BOQ items.
+    """Enqueue the PDF → BOQ pipeline for background processing.
 
-    When ``persist`` is true the extraction is written to the database
-    (idempotently replacing any prior rows for the same sheet under the
-    project) and the response gains an ``estimate_id``.
+    Returns immediately with job_id, status='queued', status_url, and
+    poll_after_ms=2000. The actual pipeline runs in a background worker;
+    poll GET /api/jobs/{job_id} for results.
+
+    Synchronous failure modes (still return non-202):
+    - File not PDF → 400
+    - File > 50 MB → 413
+    - Queue full (100 jobs) → 503
     """
+    # Validate content type
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="File must be a PDF")
 
-    # Save the uploaded PDF to a temporary file so that the path‑based
-    # helpers (classify_upload, parse_pdf) can receive a real file path.
+    # Read file content and check size
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File exceeds 50 MB limit")
+
+    # Save to temp file
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp.write(file.file.read())
+        tmp.write(content)
         tmp_path = tmp.name
 
+    # Enqueue job
+    queue = get_job_queue()
     try:
-        dq = DataQuality()
-
-        # 1️⃣ Classify
-        try:
-            classify_result = classify_upload(tmp_path)
-        except Exception:
-            dq.classifier_errors += 1
-            logger.exception(
-                "classify_upload failed; degrading upload to the raster path"
-            )
-            classify_result = {"status": "raster"}
-
-        if classify_result.get("status") != "vector":
-            # Raster path: no parsed text spans exist, so the run carries the
-            # explicit assumed-scale stamp (spec v3 §7.4) like every vector run.
-            assumed = resolve_scale([])
-            return {
-                "status": "raster",
-                "detail": "PDF classified as raster; vector pipeline skipped.",
-                "scale": {"value": assumed.scale_str, "status": assumed.status},
-                "data_quality": dq.as_dict(),
-            }
-
-        source_quality = classify_result.get("source_quality", "layered_vector")
-
-        # 2️⃣ Parse PDF
-        parsed = parse_pdf(tmp_path)
-        scale_res = resolve_scale(parsed.get("raw_text_spans", []))
-        scale = scale_res.scale_str
-        # Assumed-scale honesty: when no parseable scale token exists, every
-        # length-driven BOQ line downgrades to ASSUMED (spec v3 §7.4/§7.12).
-        scale_status = scale_res.status
-        clusters = parsed.get("clusters", [])
-        raw_drawings = parsed.get("raw_drawings", [])
-        cascade_spans = _adapt_spans_for_cascade(parsed.get("raw_text_spans", []))
-        schedule_rows = detect_schedule_rows(cascade_spans)
-
-        # 3️⃣ Measure routes (length-based assemblies: tray, conduit, ducts, pipes)
-        route_layer_names = tuple(route_layers())
-        route_stats: Dict[str, int] = {}
-        routes = measure_routes(
-            _route_layer_clusters(raw_drawings, scale),
-            raw_drawings,
-            scale,
-            route_layer_names,
-            stats=route_stats,
-        )
-        dq.degenerate_skipped += route_stats.get("degenerate_skipped", 0)
-        # Resolved cross-section sizes aligned with `routes` by index —
-        # reused when projecting a SheetExtraction for persistence.
-        route_sizes: List[Dict | None] = [None] * len(routes)
-
-        # 4️⃣ Count discrete components (symbol-based assemblies). Clusters on
-        # OCG layers that map to no rule are surfaced as UNMAPPED entries —
-        # reported and persisted, never priced (spec v3 §7.9).
-        unmapped_clusters = _unmapped_layer_clusters(
-            parsed.get("ocg_registry") or {}, raw_drawings, scale_res.denominator
-        )
-        all_components = count_components(
-            clusters + unmapped_clusters, raw_drawings, include_unmapped=True
-        )
-        components = [c for c in all_components if c["assembly_type"] is not None]
-        unmapped_components = [c for c in all_components if c["assembly_type"] is None]
-        dq.unmapped_count += len(unmapped_components)
-
-        # 4½ Legend/title-block gating: annotation glyphs (legend cells,
-        # title-block linework) and types absent from a readable sheet legend
-        # are flagged for human review — surfaced in the response, persisted
-        # as REVIEW components, NEVER priced or silently dropped.
-        schedule_blocks = detect_blocks(cascade_spans)
-        regions = detect_title_block_regions(cascade_spans)
-        allowed = legend_allowed_assemblies(schedule_blocks)
-        components, flagged_symbols = gate_components(components, regions, allowed)
-        for gate_reason in (f.get("gate_reason") for f in flagged_symbols):
-            if gate_reason == "title_block_region":
-                dq.title_block_excluded += 1
-            elif gate_reason == "not_in_legend":
-                dq.legend_gate_excluded += 1
-        # Extraction order: mapped, then legend-gated REVIEW, then UNMAPPED
-        # appended — text annotation component_index values refer into this
-        # combined list.
-        extraction_components = components + flagged_symbols + unmapped_components
-
-        # 5️⃣ Apply assembly rules & compute BOQ
-        boq_items: List[Dict[str, Any]] = []
-        with OrmSession(get_engine()) as db:
-            # Route BOQ: quantity scales with measured length
-            # Routes must ONLY evaluate against route-based assembly rules
-            for route_index, route in enumerate(routes):
-                layer = route.get("layer", "")
-                resolved_assembly = layer_to_assembly(layer)
-                # Use resolved layer assembly if available, fall back to route type
-                assembly_type = resolved_assembly if resolved_assembly else route.get("type", "")
-                if assembly_type not in ROUTE_ASSEMBLIES:
-                    dq.dropped_routes += 1
-                    continue
-
-                variables = None
-                size_source = None
-                if assembly_type in SIZED_ASSEMBLIES:
-                    fu_stats: Dict[str, int] = {}
-                    ctx = resolve_route_context(
-                        assembly_type, route, cascade_spans, scale,
-                        schedule_rows, extraction_components, routes,
-                        route_index, settings=get_settings(), stats=fu_stats,
-                    )
-                    dq.fu_corridor_excluded += fu_stats.get("fu_corridor_excluded", 0)
-                    if ctx is None:
-                        dq.dropped_routes += 1
-                        logger.warning(
-                            "dropping %s route (%.3f m): no resolvable "
-                            "cross-section size and no configured default",
-                            assembly_type, route["length_m"],
-                        )
-                        continue
-                    variables, size_source, resolved_size = ctx
-                    # Persist the EFFECTIVE tier exactly as before the
-                    # refactor; FU provenance rides along inside size.
-                    route_sizes[route_index] = {**resolved_size, "source": size_source}
-
-                # Fail-closed like persistence: one broken rule drops that
-                # route with a warning — it must never 500 the whole run
-                # (fix-wave F6).
-                try:
-                    applied = apply_assembly(assembly_type, variables=variables)
-                except FormulaValidationError as exc:
-                    dq.dropped_routes += 1
-                    logger.warning(
-                        "dropping %s route (%.3f m): assembly rule failed (%s)",
-                        assembly_type,
-                        route["length_m"],
-                        exc,
-                    )
-                    continue
-                for mat in applied.get("materials", []):
-                    quantity = mat["quantity"]
-                    # Legacy electrical path (variables=None): constants are
-                    # per-unit-length multipliers scaled here. Mechanical
-                    # rules with bound variables already scale their constant
-                    # lines by length_m inside rules.py — scaling again would
-                    # square every fitting length (0.2 * L^2).
-                    if variables is None and "formula" not in (
-                        mat.get("derivation") or {}
-                    ):
-                        quantity *= route["length_m"]
-                    boq_items.append(
-                        _boq_line(
-                            assembly_type,
-                            mat["material_name"],
-                            quantity,
-                            route.get("confidence_status", "MEASURED"),
-                            route.get("source_path_ids", []),
-                            db,
-                            source_quality=source_quality,
-                            derivation=mat.get("derivation"),
-                            size_source=size_source,
-                            rule_version=applied.get("rule_version"),
-                            scale_assumed=(scale_status == "assumed"),
-                            source=source_region(
-                                route.get("page"), route.get("bbox")
-                            ),
-                        )
-                    )
-                # One extra BOQ line per rule-with-labor (spec v3 §7.14) —
-                # same tier treatment as the material lines above.
-                labor_payload = labor_line_payload(
-                    load_assembly_rule(assembly_type),
-                    assembly_type,
-                    applied,
-                    applied.get("rule_version"),
-                )
-                if labor_payload is not None:
-                    boq_items.append(
-                        _boq_line(
-                            assembly_type,
-                            labor_payload["material_name"],
-                            float(applied.get("labor_hours") or 0.0),
-                            route.get("confidence_status", "MEASURED"),
-                            route.get("source_path_ids", []),
-                            db,
-                            source_quality=source_quality,
-                            size_source=size_source,
-                            rule_version=applied.get("rule_version"),
-                            scale_assumed=(scale_status == "assumed"),
-                            source=source_region(
-                                route.get("page"), route.get("bbox")
-                            ),
-                            labor_payload=labor_payload,
-                        )
-                    )
-
-            # Component BOQ: one assembly instance per counted symbol
-            # Enforce strict 1-to-1 layer-to-assembly matching (Phase 2 rule).
-            for comp in components:
-                resolved_type = comp.get("assembly_type")
-
-                # Sized route assemblies are quantified by the ROUTE loop
-                # (formula needs per-route size variables); a duct/pipe
-                # cluster surfacing here is geometry, not a countable symbol.
-                if resolved_type in SIZED_ASSEMBLIES:
-                    dq.dropped_symbols += 1
-                    continue
-
-                rule = load_assembly_rule(resolved_type)
-                if rule is None or resolved_type != rule.get("name", resolved_type):
-                    # STRICT SKIP: never apply an unrelated rule to a component
-                    dq.dropped_symbols += 1
-                    continue
-
-                # Fail-closed like persistence: one broken rule drops that
-                # symbol type with a warning — never a 500 (fix-wave F6).
-                try:
-                    applied = apply_assembly(resolved_type)
-                except FormulaValidationError as exc:
-                    dq.dropped_symbols += 1
-                    logger.warning(
-                        "dropping %s symbols (count path): assembly rule "
-                        "failed (%s)",
-                        resolved_type,
-                        exc,
-                    )
-                    continue
-                for mat in applied.get("materials", []):
-                    quantity = mat["quantity"] * comp["count"]
-                    boq_items.append(
-                        _boq_line(
-                            resolved_type,
-                            mat["material_name"],
-                            quantity,
-                            comp.get("confidence_status", "MEASURED"),
-                            comp.get("source_path_ids", []),
-                            db,
-                            source_quality=source_quality,
-                            derivation=mat.get("derivation"),
-                            size_source=None,
-                            rule_version=rule.get("rule_version"),
-                            source=source_region(
-                                comp.get("page"), comp.get("bbox")
-                            ),
-                        )
-                    )
-                # One extra labor line per counted instance, scaled by the
-                # cluster count exactly like the material lines (spec v3
-                # §7.14); persistence aggregates the same hours per type.
-                labor_payload = labor_line_payload(
-                    rule, resolved_type, applied, rule.get("rule_version")
-                )
-                if labor_payload is not None:
-                    boq_items.append(
-                        _boq_line(
-                            resolved_type,
-                            labor_payload["material_name"],
-                            float(applied.get("labor_hours") or 0.0) * comp["count"],
-                            comp.get("confidence_status", "MEASURED"),
-                            comp.get("source_path_ids", []),
-                            db,
-                            source_quality=source_quality,
-                            size_source=None,
-                            rule_version=rule.get("rule_version"),
-                            source=source_region(
-                                comp.get("page"), comp.get("bbox")
-                            ),
-                            labor_payload=labor_payload,
-                        )
-                    )
-
-        # Full SheetExtraction bundle — built AFTER the BOQ loop so
-        # route_sizes carries every cascade-resolved cross-section: the
-        # persisted rows must reflect exactly the provenance that drove the
-        # response math, never re-derived defaults (F1).
-        filename = file.filename or ""
-        sheet_name = os.path.splitext(filename)[0] or None
-        extraction = _build_sheet_extraction(
-            sheet_name=sheet_name,
-            scale=scale,
-            scale_status=scale_res.status,
-            scale_str=scale_res.scale_str,
-            source_quality=source_quality,
-            routes=routes,
-            route_sizes=route_sizes,
-            components=extraction_components,
-            ocg_registry=parsed.get("ocg_registry") or {},
-            cascade_spans=cascade_spans,
-            raw_text_spans=parsed.get("raw_text_spans", []),
-            pdf_path=tmp_path,
-            data_quality=dq.as_dict(),
-            schedule_blocks=schedule_blocks,
-        )
-
-        # Optional persistence (default-off): write the full extraction
-        # bundle through the persistence spine in its own committing session.
-        estimate_id: uuid.UUID | None = None
-        if persist:
-            # Capture the exact uploaded bytes BEFORE the finally-unlink
-            # removes the temp copy — the stored artifact must be the file
-            # that was uploaded, byte for byte.
-            pdf_bytes = Path(tmp_path).read_bytes()
-            with OrmSession(get_engine()) as persist_db:
-                estimate_id = persist_extraction(
-                    persist_db, project_id, extraction, pdf_bytes=pdf_bytes
-                )
-
-        response: Dict[str, Any] = {
-            "status": "ok",
-            "scale": {"value": scale_res.scale_str, "status": scale_res.status},
-            "routes_measured": len(routes),
-            "components_found": len(components),
-            "boq_items": boq_items,
-            "layers_count": len(extraction.layers),
-            "schedule_blocks_count": len(extraction.schedule_blocks),
-            "text_annotations_count": len(extraction.text_annotations),
-            "unmapped_items": _aggregate_unmapped(unmapped_components),
-            "flagged_symbols": aggregate_flagged(flagged_symbols),
-            "data_quality": dq.as_dict(),
-        }
-        if persist and estimate_id is not None:
-            response["estimate_id"] = str(estimate_id)
-        return response
-
-    finally:
-        # Clean up the temporary PDF file – runs even if we returned early.
+        job_id = queue.enqueue("e2e_run", {
+            "file_path": tmp_path,
+            "persist": persist,
+            "project_id": str(project_id) if project_id else None,
+            "original_filename": file.filename or "",
+        })
+    except Exception:
+        # Clean up temp file if enqueue fails
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
+        # Check if queue is full
+        if len(queue._jobs) >= queue._MAX_JOBS:
+            raise HTTPException(status_code=503, detail="Job queue full (100 jobs max)")
+        raise
+
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "status_url": f"/api/jobs/{job_id}",
+        "poll_after_ms": 2000,
+    }
