@@ -16,6 +16,7 @@ import { ProtocolCard } from "@/components/ui/ProtocolCard"
 import { usePipelineRun } from "@/hooks/usePipelineRun"
 import { apiGet, apiPostForm } from "@/lib/api"
 import type { DrawingQualityCheck, QualityVerdict } from "@/types/drawing"
+import type { E2eRunResult } from "@/types/estimate"
 
 const QUALITY_CHECK_FAILED_COPY =
   "Couldn't read this PDF's structure. The file may be corrupted. Try re-exporting from your CAD application."
@@ -95,10 +96,15 @@ export default function UploadPage() {
       setQuality({ verdict: result.verdict, metrics: result.metrics })
       setDrawingId(result.drawing_id ?? newCorrelationId())
       setPhase("ready")
-    } catch {
+    } catch (err) {
       setQuality(null)
       setCheckFailed(true)
       setPhase("ready")
+      setRunFailureDetail(
+        err instanceof Error
+          ? `Quality check failed: ${err.message}`
+          : "Quality check failed: cannot reach the server. Check your connection."
+      )
     }
   }
 
@@ -121,12 +127,22 @@ export default function UploadPage() {
             router.push(`/estimates/${result.estimate_id}`)
             return
           }
+          // NEW: empty-BOQ specific message
+          if (result.boq_items?.length === 0) {
+            const layers = (result as E2eRunResult & { layers_count?: number }).layers_count ?? 0
+            setRunFailureDetail(
+              `Drawing parsed (${layers} layers detected), but no assembly rule matches this discipline yet. Add a rule in data/assemblies/ to count fixtures on this kind of drawing.`
+            )
+            setPhase("ready")
+            return
+          }
           setRunFailureDetail(
             result.detail ?? "The pipeline finished without producing an estimate.",
           )
           setPhase("ready")
         },
         onError: (error: Error) => {
+          // NEW: surface real error
           setRunFailureDetail(error.message)
           setPhase("ready")
         },
@@ -182,7 +198,7 @@ export default function UploadPage() {
                 </div>
 
                 {checkFailed ? (
-                  <ErrorState description={QUALITY_CHECK_FAILED_COPY} />
+                  <ErrorState description={runFailureDetail ?? QUALITY_CHECK_FAILED_COPY} />
                 ) : (
                   quality && (
                     <>
