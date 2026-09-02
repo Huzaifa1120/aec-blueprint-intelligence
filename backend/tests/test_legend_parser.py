@@ -58,10 +58,10 @@ def test_fixture_spec_has_required_fields():
     assert not missing, f"FixtureSpec missing fields: {missing}"
 
 
-def test_parse_legend_codes_match_dd_dddd_pattern(specs):
-    """Fixture type codes are formatted 02-XXXX."""
+def test_parse_legend_codes_match_symbol_pattern(specs):
+    """Fixture type codes match the legend symbol pattern: R1, R1CB, C1, C1CB, S1, S1CB, W1, W2, W3, L1, L2, EM1, EM2, EM3, EM4."""
     import re
-    pat = re.compile(r"^\d{2}-\d{4}$")
+    pat = re.compile(r'^(R|C|S|W|L)\d+(CB)?$|^EM\d+$')
     bad = [s.code for s in specs if not pat.match(s.code)]
     assert not bad, f"Malformed codes: {bad}"
 

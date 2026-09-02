@@ -137,7 +137,7 @@ describe("usePipelineRun", () => {
 
     const promise = act(async () => {
       await expect(result.current.mutateAsync({ file: makePdfFile(), persist: true })).rejects.toThrow(
-        /Pipeline still running after 120s/,
+        /Pipeline still running after 600s/,
       )
     })
 

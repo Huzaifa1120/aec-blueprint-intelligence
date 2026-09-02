@@ -1,11 +1,13 @@
 import math
-from typing import List, Tuple, Dict, Any
+from typing import List
 import pymupdf
 
 from .types import (
     FixtureSymbol, Marker, FixtureInstance,
     SYMBOL_SPECS, EMERGENCY_CLASSES
 )
+from .denoiser import DenoisedSymbol
+from .room_mapper import RoomPolygon, assign_symbol_to_room
 
 
 def colors_match(c1, c2, tol: float = 0.05) -> bool:
@@ -43,9 +45,6 @@ def extract_all_candidate_symbols(page: pymupdf.Page) -> List[FixtureSymbol]:
             continue
         
         cmds = tuple(item[0] for item in items)
-        color = d.get('color')
-        width = d.get('width')
-        fill = d.get('fill')
         
         # Classify symbol type
         symbol_type = "unknown"
@@ -75,8 +74,8 @@ def extract_markers(page: pymupdf.Page) -> List[Marker]:
     
     for b in blocks:
         if 'lines' in b:
-            for l in b['lines']:
-                for s in l['spans']:
+            for line in b['lines']:
+                for s in line['spans']:
                     text = s['text'].strip()
                     if text in EMERGENCY_CLASSES[:3]:  # CB, EM, EMEM
                         x = s['bbox'][0]
@@ -192,3 +191,65 @@ def debug_print_association(instances: List[FixtureInstance], markers: List[Mark
     
     # Total candidate symbols
     print(f"Total candidate symbols examined: {len(symbols)}")
+
+
+def enrich_denoised_symbols(
+    symbols: List[DenoisedSymbol],
+    page: pymupdf.Page,
+    rooms: List[RoomPolygon],
+    max_marker_radius: float = 30.0,
+) -> List[DenoisedSymbol]:
+    """
+    Enrich DenoisedSymbols with marker associations and room assignments.
+    
+    This is the V2 pipeline step that connects V1 symbols to V2 spatial data.
+    Updates symbols in-place with:
+      - has_marker: bool
+      - marker_label: str (CB, EM, EMEM, or None)
+      - assigned_room: str (room_id or None)
+    
+    Returns the same list for chaining.
+    """
+    # Extract markers from page
+    markers = extract_markers(page)
+    
+    if not markers:
+        # Still assign rooms even without markers
+        for sym in symbols:
+            room = assign_symbol_to_room(sym.centroid, rooms)
+            if room:
+                sym.assigned_room = room.room_id
+        return symbols
+    
+    # Track which symbols get a marker
+    symbol_assigned = [False] * len(symbols)
+    
+    # Associate each marker to nearest symbol (marker-centric, like associate_markers_to_symbols)
+    for m in markers:
+        mx, my = m['position']
+        best_idx = -1
+        best_dist = float('inf')
+        
+        for i, sym in enumerate(symbols):
+            if symbol_assigned[i]:
+                continue
+            sx, sy = sym.centroid
+            dist = math.hypot(sx - mx, sy - my)
+            if dist < best_dist and dist <= max_marker_radius:
+                best_dist = dist
+                best_idx = i
+        
+        if best_idx >= 0:
+            # Found a symbol for this marker
+            sym = symbols[best_idx]
+            symbol_assigned[best_idx] = True
+            sym.has_marker = True
+            sym.marker_label = m['label']
+    
+    # Assign rooms to ALL symbols (not just those with markers)
+    for sym in symbols:
+        room = assign_symbol_to_room(sym.centroid, rooms)
+        if room:
+            sym.assigned_room = room.room_id
+    
+    return symbols

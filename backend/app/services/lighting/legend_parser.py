@@ -1,57 +1,68 @@
 """V3: Legend Parser.
 
-Parses the fixture schedule (legend, Y < 1000 region) of a lighting layout PDF
-into a list of FixtureSpec records. The legend is a multi-column schedule:
+Parses the fixture schedule (legend) at the bottom of the page (Y ≈ 2900-3100).
+The legend has symbol codes (R1, R2, C1, S1, W1, L1, EM1, etc.) at Y≈2970,
+with their descriptions at Y≈3025 containing IP, wattage, dimensions, DALI driver info.
+DITTO AS ABOVE markers indicate inheritance from the previous spec.
 
-    +-------+-------+-------+-------+-------+-------+-------+-------+
-    |   A   |   B   |   C   |   D   |   E   |   F   |   G   |   H   | ...
-    +-------+-------+-------+-------+-------+-------+-------+-------+
-
-Each column has a stack of fixture type rows. A row is anchored by a
-"02-XXXX" fixture-type code (small ArialMT, ~3.5pt). Surrounding attributes
-(wattage, dimensions, IP, driver, mount) are grouped by Y-cluster around the
-anchor.
+Note: Description text is vertical (rotated), so spans have tall bboxes (y0≈3025, y1≈3175+).
+Use TOP Y (y0) for matching, not center Y.
 """
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Dict, Any
 
 import pymupdf
 
 
-# Y bound for the legend region (everything above the floor plan starts ~Y=600,
-# but legend can extend further; 1000 is a safe upper bound for the schedule).
-LEGEND_Y_MAX = 1000.0
+# Legend region at bottom of page
+LEGEND_Y_MIN = 2850.0
+LEGEND_Y_MAX = 3100.0
 
-# Anchor pattern: fixture type codes are formatted 02-XXXX.
-FIXTURE_CODE_PATTERN = re.compile(r"^\d{2}-\d{4}$")
+# X range for the fixture legend (right side of sheet)
+LEGEND_X_MIN = 1450.0
+LEGEND_X_MAX = 2050.0
 
-# Column letter labels sit at the top of the legend (sz ~18 ArialMT).
-COLUMN_LETTER_PATTERN = re.compile(r"^[A-Z]$")
+# Symbol code patterns: R1, R1CB, C1, C1CB, S1, S1CB, W1, W2, W3, L1, L2, EM1, EM2, EM3, EM4
+SYMBOL_CODE_PATTERN = re.compile(r'^(R|C|S|W|L)\d+(CB)?$|^EM\d+$')
 
-# IP rating pattern: IP44, IP65, IP20, etc.
-IP_PATTERN = re.compile(r"\bIP\s*(\d{2})\b", re.IGNORECASE)
+# Symbol Y position (top of symbol code)
+SYMBOL_Y = 2975.0
+SYMBOL_Y_TOL = 10.0
 
-# Wattage: numeric value followed by 'W' (e.g. "12W", "30W")
+# Description Y position (TOP of vertical text block)
+DESCRIPTION_Y = 3025.0
+DESCRIPTION_Y_TOL = 10.0
+
+# CB marker Y range
+CB_Y_MIN = 2990.0
+CB_Y_MAX = 3015.0
+
+# IP rating pattern: IP44, IP65, IP20, IP-44, IP-65, etc.
+IP_PATTERN = re.compile(r"\bIP[-\s]*(\d{2})\b", re.IGNORECASE)
+
+# Wattage: numeric value followed by 'W' (e.g. "12W", "30W", "36W")
 WATTAGE_PATTERN = re.compile(r"\b(\d{1,3})\s*W\b", re.IGNORECASE)
 
-# Dimensions like "600x600", "1800x200", "150x150"
-DIMENSION_PATTERN = re.compile(r"\b(\d{2,4})\s*[xX×]\s*(\d{2,4})\b")
+# Dimensions like "600x600", "1800x200", "150x150", "598X598mm"
+DIMENSION_PATTERN = re.compile(r"\b(\d{2,4})\s*[xX×]\s*(\d{2,4})", re.IGNORECASE)
 
-# Emergency class markers in the legend (CB = circuit breaker / standard,
-# EM = emergency, EMEM = combined emergency)
-EMERGENCY_LABELS = {"CB", "EM", "EMEM"}
+# Emergency conversion markers
+DITTO_PATTERN = re.compile(r"DITTO\s+AS\s+ABOVE", re.IGNORECASE)
+CONVERSION_PATTERN = re.compile(r"(\d+)%\s+TO\s+BE\s+EQUIPPED\s+WITH\s+CONVERSION\s+MODULE", re.IGNORECASE)
+CENTRAL_BATTERY_PATTERN = re.compile(r"CONNECTED\s+TO\s+CENTRAL\s+BATTERY\s+PANEL", re.IGNORECASE)
 
-# Driver / mount hints — looked for as keywords in nearby text
-DRIVER_KEYWORDS = {"DALI", "0-10V", "1-10V", "NON-DIM", "PHASE", "SWITCH"}
+# Driver keywords
+DRIVER_KEYWORDS = {"DALI", "0-10V", "1-10V", "NON-DIM", "PHASE", "SWITCH", "ON/OFF"}
+
+# Mount keywords
 MOUNT_KEYWORDS = {
     "RECESSED", "SURFACE", "PENDANT", "WALL", "TRACK", "TRUNKING",
-    "DOWN", "UP", "SUSPENDED", "GROUND", "POLE",
+    "DOWN", "UP", "SUSPENDED", "GROUND", "POLE", "CEILING", "FALSE CEILING",
 }
 
-# Shape hints — assigned by the shape drawn in the legend (circle/hexagon/etc.)
-# Since the legend mostly uses text icons, we use key clues from the description.
+# Shape hints from description keywords
 SHAPE_HINTS_BY_KEYWORD = {
     "panel": "panel",
     "downlight": "downlight",
@@ -69,24 +80,29 @@ SHAPE_HINTS_BY_KEYWORD = {
     "track": "strip",
     "trunking": "strip",
     "coffer": "panel",
-    "cofferred": "panel",
+    "coffered": "panel",
+    "water proof": "industrial",
+    "explosion proof": "industrial",
+    "rectangular": "panel",
+    "wall lighting": "strip",
+    "flex": "strip",
+    "cell": "strip",
 }
 
 
 @dataclass
 class FixtureSpec:
-    code: str                       # e.g. "02-0318"
-    description: str                # e.g. "CRYP BANK" (may be empty)
-    wattage: Optional[int]          # e.g. 30
+    code: str                       # e.g. "R1", "C1", "EM1"
+    description: str                # Full description text
+    wattage: Optional[int]          # e.g. 36
     dimensions: Optional[str]       # e.g. "600x600"
     ip_rating: Optional[str]        # e.g. "IP65"
     shape_hint: str                 # "panel" | "downlight" | "strip" | "exit" | "industrial" | "unknown"
     driver: Optional[str]           # e.g. "DALI"
-    conversion_pct: Optional[float] # 0.0 - 1.0, fraction of fixtures with emergency
-    has_emergency: bool             # True if spec supports emergency mode
+    conversion_pct: Optional[float] # 0.0 - 1.0, fraction with emergency conversion
+    has_emergency: bool             # True if spec has emergency (CB marker nearby or EM symbol)
     mount: Optional[str]            # e.g. "RECESSED", "SURFACE", "WALL"
-    column: str                     # "A" | "B" | ... source column letter
-    row_y: float                    # Y position of the anchor code
+    row_y: float                    # Y position of the symbol code
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -100,7 +116,6 @@ class FixtureSpec:
             "conversion_pct": self.conversion_pct,
             "has_emergency": self.has_emergency,
             "mount": self.mount,
-            "column": self.column,
             "row_y": self.row_y,
         }
 
@@ -108,8 +123,8 @@ class FixtureSpec:
 # ---------- Helpers ----------
 
 
-def _extract_spans(page: pymupdf.Page) -> List[Dict[str, Any]]:
-    """Return a flat list of all text spans with bbox + formatting."""
+def _extract_legend_spans(page: pymupdf.Page) -> List[Dict[str, Any]]:
+    """Extract all text spans in the legend region."""
     out: List[Dict[str, Any]] = []
     blocks = page.get_text("dict")["blocks"]
     for b in blocks:
@@ -121,50 +136,119 @@ def _extract_spans(page: pymupdf.Page) -> List[Dict[str, Any]]:
                 if not text:
                     continue
                 x0, y0, x1, y1 = span["bbox"]
-                out.append({
-                    "text": text,
-                    "x0": x0,
-                    "x1": x1,
-                    "y0": y0,
-                    "y1": y1,
-                    "cx": (x0 + x1) / 2.0,
-                    "cy": (y0 + y1) / 2.0,
-                    "size": span["size"],
-                    "font": span["font"],
-                })
+                cx = (x0 + x1) / 2.0
+                # Filter to legend region (use y0 for vertical text)
+                if LEGEND_Y_MIN <= y0 <= LEGEND_Y_MAX and LEGEND_X_MIN <= cx <= LEGEND_X_MAX:
+                    out.append({
+                        "text": text,
+                        "x0": x0,
+                        "x1": x1,
+                        "y0": y0,
+                        "y1": y1,
+                        "cx": cx,
+                        "cy": (y0 + y1) / 2.0,
+                        "size": span["size"],
+                        "font": span["font"],
+                    })
     return out
 
 
-def _find_column_letters(spans: List[Dict[str, Any]]) -> List[Tuple[str, float]]:
-    """Identify the top column letter labels and their x positions."""
-    letters: List[Tuple[str, float]] = []
+def _find_symbol_anchors(spans: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Find symbol code anchors (R1, C1, S1, W1, L1, EM1, etc.) in the legend."""
+    anchors = []
     for s in spans:
-        if s["cy"] > 150:  # column headers live near the top
-            continue
-        if s["size"] < 10:  # bold/18pt is the header size
-            continue
-        if COLUMN_LETTER_PATTERN.match(s["text"]):
-            letters.append((s["text"], s["cx"]))
-    letters.sort(key=lambda t: t[1])
-    return letters
+        if SYMBOL_CODE_PATTERN.match(s["text"]):
+            # Symbol codes are at Y ≈ 2975 (larger font ~4.1pt)
+            if abs(s["y0"] - SYMBOL_Y) <= SYMBOL_Y_TOL and s["size"] >= 3.5:
+                anchors.append(s)
+    # Sort by X position (left to right)
+    anchors.sort(key=lambda a: a["cx"])
+    return anchors
 
 
-def _column_for_x(x: float, letters: List[Tuple[str, float]]) -> str:
-    """Return the column letter whose center is closest to x, but only if within range."""
-    if not letters:
-        return "?"
-    best_letter, best_dist = letters[0], float("inf")
-    for letter, lx in letters:
-        dist = abs(x - lx)
-        if dist < best_dist:
-            best_letter, best_dist = letter, dist
-    if best_dist > 200:  # too far away from any column header
-        return "?"
-    return best_letter
+def _find_cb_markers(spans: List[Dict[str, Any]]) -> Dict[float, str]:
+    """Find CB/EX markers near symbol positions. Returns dict of symbol_x -> marker_type."""
+    cb_map = {}
+    for s in spans:
+        if s["text"] in {"CB", "EX"} and CB_Y_MIN <= s["y0"] <= CB_Y_MAX:
+            cb_map[round(s["cx"], 1)] = s["text"]
+    return cb_map
+
+
+def _find_descriptions(spans: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Find description spans at Y ≈ 3025 (use TOP Y for vertical text)."""
+    descs = []
+    for s in spans:
+        # Match on y0 (top of vertical text block)
+        if abs(s["y0"] - DESCRIPTION_Y) <= DESCRIPTION_Y_TOL and s["size"] >= 3.0:
+            descs.append(s)
+    descs.sort(key=lambda d: d["cx"])
+    return descs
+
+
+def _match_description_to_symbol(symbol_x: float, descriptions: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Match a symbol to its description by closest X position."""
+    if not descriptions:
+        return None
+    best = min(descriptions, key=lambda d: abs(d["cx"] - symbol_x))
+    if abs(best["cx"] - symbol_x) <= 50:  # Within 50pt horizontally
+        return best
+    return None
+
+
+def _extract_attributes(text: str) -> Dict[str, Any]:
+    """Extract IP, wattage, dimensions, driver, mount from description text."""
+    attrs = {
+        "ip_rating": None,
+        "wattage": None,
+        "dimensions": None,
+        "driver": None,
+        "mount": None,
+        "conversion_pct": None,
+        "is_ditto": False,
+    }
+
+    # IP rating
+    ip_match = IP_PATTERN.search(text)
+    if ip_match:
+        attrs["ip_rating"] = f"IP{ip_match.group(1)}"
+
+    # Wattage
+    watt_match = WATTAGE_PATTERN.search(text)
+    if watt_match:
+        attrs["wattage"] = int(watt_match.group(1))
+
+    # Dimensions
+    dim_match = DIMENSION_PATTERN.search(text)
+    if dim_match:
+        attrs["dimensions"] = f"{dim_match.group(1)}x{dim_match.group(2)}"
+
+    # Driver
+    for kw in DRIVER_KEYWORDS:
+        if kw in text.upper():
+            attrs["driver"] = kw
+            break
+
+    # Mount
+    upper = text.upper()
+    for kw in MOUNT_KEYWORDS:
+        if kw in upper:
+            attrs["mount"] = kw
+            break
+
+    # DITTO AS ABOVE
+    if DITTO_PATTERN.search(text):
+        attrs["is_ditto"] = True
+        # Extract conversion percentage
+        conv_match = CONVERSION_PATTERN.search(text)
+        if conv_match:
+            attrs["conversion_pct"] = float(conv_match.group(1)) / 100.0
+
+    return attrs
 
 
 def _infer_shape_hint(text: str) -> str:
-    """Map description / nearby text to a shape_hint."""
+    """Map description to a shape_hint."""
     low = text.lower()
     for kw, hint in SHAPE_HINTS_BY_KEYWORD.items():
         if kw in low:
@@ -172,125 +256,79 @@ def _infer_shape_hint(text: str) -> str:
     return "unknown"
 
 
-def _build_spec_from_anchor(
-    code: str, anchor: Dict[str, Any], nearby: List[Dict[str, Any]],
-    column: str,
-) -> FixtureSpec:
-    """Extract a FixtureSpec from the anchor span and surrounding nearby spans."""
-    # Concatenate nearby text for keyword search
-    nearby_text = " ".join(s["text"] for s in nearby)
+def _has_emergency(symbol_code: str, symbol_x: float, cb_map: Dict[float, str]) -> bool:
+    """Determine if a fixture spec has emergency capability."""
+    # EM symbols are emergency by definition
+    if symbol_code.startswith("EM"):
+        return True
+    # Check for CB/EX marker at same X
+    for cb_x, marker in cb_map.items():
+        if abs(cb_x - symbol_x) <= 30:
+            return True
+    return False
 
-    # IP rating
-    ip_match = IP_PATTERN.search(nearby_text)
-    ip_rating = f"IP{ip_match.group(1)}" if ip_match else None
 
-    # Wattage
-    watt_match = WATTAGE_PATTERN.search(nearby_text)
-    wattage = int(watt_match.group(1)) if watt_match else None
-
-    # Dimensions
-    dim_match = DIMENSION_PATTERN.search(nearby_text)
-    dimensions = f"{dim_match.group(1)}x{dim_match.group(2)}" if dim_match else None
-
-    # Emergency presence
-    has_emergency = any(s["text"] in EMERGENCY_LABELS for s in nearby)
-    emergency_count = sum(1 for s in nearby if s["text"] in EMERGENCY_LABELS)
-    total_markers = emergency_count
-    if total_markers > 0:
-        # Fraction of nearby labels that are emergency
-        em_count = sum(1 for s in nearby if s["text"] in {"EM", "EMEM"})
-        conversion_pct = min(1.0, em_count / total_markers)
-    else:
-        conversion_pct = None
-
-    # Driver
-    driver = None
-    for kw in DRIVER_KEYWORDS:
-        if kw in nearby_text.upper():
-            driver = kw
-            break
-
-    # Mount
-    mount = None
-    upper_text = nearby_text.upper()
-    for kw in MOUNT_KEYWORDS:
-        if kw in upper_text:
-            mount = kw
-            break
-
-    # Description: pick the most descriptive nearby label (ArialMT 3.5pt, longer text)
-    description_candidates = [
-        s["text"] for s in nearby
-        if s["text"] not in EMERGENCY_LABELS
-        and not FIXTURE_CODE_PATTERN.match(s["text"])
-        and not WATTAGE_PATTERN.match(s["text"])
-        and not re.fullmatch(r"\d{2,4}[xX×]\d{2,4}", s["text"])
-        and not re.fullmatch(r"\d+", s["text"])
-        and s["text"] not in {"WC", "E/S", "CH.", "DN", "UP", "GR"}
-    ]
-    description = max(description_candidates, key=len) if description_candidates else ""
-
-    # Shape hint — combine anchor & description heuristics
-    shape_hint = _infer_shape_hint(description or nearby_text)
-
-    return FixtureSpec(
-        code=code,
-        description=description,
-        wattage=wattage,
-        dimensions=dimensions,
-        ip_rating=ip_rating,
-        shape_hint=shape_hint,
-        driver=driver,
-        conversion_pct=conversion_pct,
-        has_emergency=has_emergency,
-        mount=mount,
-        column=column,
-        row_y=anchor["y0"],
-    )
+# ---------- Main API ----------
 
 
 def parse_legend(page: pymupdf.Page) -> List[FixtureSpec]:
-    """Parse the fixture schedule (legend) of a lighting layout page.
-
-    Strategy:
-      1. Extract all text spans
-      2. Identify column header letters (top of legend)
-      3. Find fixture-type anchors (02-XXXX) in legend region
-      4. Group nearby spans around each anchor (by Y, then X)
-      5. Build a FixtureSpec per anchor
-    """
-    spans = _extract_spans(page)
-    letters = _find_column_letters(spans)
-
-    # Find anchors in legend region
-    anchors = [
-        s for s in spans
-        if FIXTURE_CODE_PATTERN.match(s["text"]) and s["y0"] < LEGEND_Y_MAX
-    ]
+    """Parse the fixture schedule (legend) at bottom of page (Y ≈ 2900-3100)."""
+    spans = _extract_legend_spans(page)
+    anchors = _find_symbol_anchors(spans)
+    cb_map = _find_cb_markers(spans)
+    descriptions = _find_descriptions(spans)
 
     specs: List[FixtureSpec] = []
-    seen_codes: set = set()
+    prev_attrs: Optional[Dict[str, Any]] = None
 
     for anchor in anchors:
         code = anchor["text"]
-        if code in seen_codes:
-            continue  # dedupe
-        seen_codes.add(code)
+        symbol_x = anchor["cx"]
+        symbol_y = anchor["y0"]
 
-        # Collect nearby spans: within Y +/- 80pt and X +/- 200pt of anchor.
-        nearby = [
-            s for s in spans
-            if abs(s["y0"] - anchor["y0"]) <= 80
-            and abs(s["cx"] - anchor["cx"]) <= 200
-            and s is not anchor
-        ]
+        # Match to description
+        desc_span = _match_description_to_symbol(symbol_x, descriptions)
+        if desc_span:
+            desc_text = desc_span["text"]
+            attrs = _extract_attributes(desc_text)
+        else:
+            desc_text = ""
+            attrs = {"ip_rating": None, "wattage": None, "dimensions": None,
+                     "driver": None, "mount": None, "conversion_pct": None, "is_ditto": False}
 
-        column = _column_for_x(anchor["cx"], letters)
-        spec = _build_spec_from_anchor(code, anchor, nearby, column)
+        # Handle DITTO AS ABOVE - inherit from previous spec
+        if attrs["is_ditto"] and prev_attrs is not None:
+            # Inherit IP, wattage, dimensions, driver, mount, shape from previous
+            for key in ["ip_rating", "wattage", "dimensions", "driver", "mount"]:
+                if attrs[key] is None:
+                    attrs[key] = prev_attrs.get(key)
+            # Keep conversion_pct from DITTO line (e.g., 25% conversion)
+            description = desc_text
+        else:
+            description = desc_text
+            prev_attrs = attrs.copy()
+
+        # Shape hint
+        shape_hint = _infer_shape_hint(description)
+
+        # Emergency
+        has_emergency = _has_emergency(code, symbol_x, cb_map)
+
+        spec = FixtureSpec(
+            code=code,
+            description=description,
+            wattage=attrs["wattage"],
+            dimensions=attrs["dimensions"],
+            ip_rating=attrs["ip_rating"],
+            shape_hint=shape_hint,
+            driver=attrs["driver"],
+            conversion_pct=attrs["conversion_pct"],
+            has_emergency=has_emergency,
+            mount=attrs["mount"],
+            row_y=symbol_y,
+        )
         specs.append(spec)
 
-    # Sort: column letter order, then by Y
-    specs.sort(key=lambda s: (s.column, s.row_y))
     return specs
 
 
@@ -326,5 +364,4 @@ def get_legend_stats(specs: List[FixtureSpec]) -> Dict[str, Any]:
         "by_ip": dict(ip_counts),
         "by_emergency": dict(em_counts),
         "wattage_range": (min(wattages), max(wattages)) if wattages else None,
-        "by_column": dict(Counter(s.column for s in specs)),
     }

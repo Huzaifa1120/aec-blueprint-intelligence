@@ -21,6 +21,9 @@ import type { E2eRunResult } from "@/types/estimate"
 const QUALITY_CHECK_FAILED_COPY =
   "Couldn't read this PDF's structure. The file may be corrupted. Try re-exporting from your CAD application."
 
+const PIPELINE_TIMEOUT_COPY =
+  "Pipeline still running after 600s. The job continues in the background — refresh the estimates list."
+
 type Phase = "idle" | "checking" | "ready" | "running"
 
 interface CheckedQuality {
@@ -234,7 +237,19 @@ export default function UploadPage() {
             )}
 
             {runFailureDetail && (
-              <ErrorState title="Couldn't complete the takeoff" description={runFailureDetail} />
+              <ErrorState
+                title="Couldn't complete the takeoff"
+                description={runFailureDetail}
+                action={
+                  runFailureDetail.includes("300s")
+                    ? (
+                      <Button variant="outline" size="sm" onClick={() => router.refresh()}>
+                        Refresh estimates
+                      </Button>
+                    )
+                    : undefined
+                }
+              />
             )}
           </div>
 

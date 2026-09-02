@@ -4,7 +4,7 @@ import type { E2eRunResult } from "@/types/estimate"
 
 const POLL_INTERVAL_MS = 2000
 const POLL_BACKOFF_MAX_MS = 10000
-const POLL_TOTAL_TIMEOUT_MS = 120000
+const POLL_TOTAL_TIMEOUT_MS = 600000
 
 interface JobResponse {
   id: string
@@ -37,7 +37,7 @@ async function pollUntilDone(jobId: string, signal: AbortSignal): Promise<E2eRun
     await sleep(interval, signal)
     interval = Math.min(interval * 1.5, POLL_BACKOFF_MAX_MS)
   }
-  throw new Error("Pipeline still running after 120s")
+  throw new Error("Pipeline still running after 600s. The job continues in the background — refresh the estimates list.")
 }
 
 export function usePipelineRun() {
