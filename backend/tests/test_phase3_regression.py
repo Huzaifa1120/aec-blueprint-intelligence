@@ -33,7 +33,6 @@ SAMPLE = os.path.join(
 
 @pytest.fixture(scope="module")
 def client():
-    from app.main import app
     with TestClient(app) as test_client:
         yield test_client
 

@@ -1,5 +1,4 @@
 from typing import TypedDict, List, Tuple
-from dataclasses import dataclass
 
 
 class TextSpan(TypedDict):

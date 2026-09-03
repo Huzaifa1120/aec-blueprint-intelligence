@@ -31,7 +31,6 @@ N_EQUIPMENT_UNITS = 277
 
 @pytest.fixture(scope="module")
 def client():
-    from app.main import app
     with TestClient(app) as test_client:
         yield test_client
 

@@ -1,25 +1,80 @@
-# conftest.py — MUST run before any app imports (sets env + creates tables)
-import os
-import tempfile
-from pathlib import Path  # noqa: E402
+# conftest.py — Supabase PostgreSQL test fixtures with transaction rollback isolation
+import pytest
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 
-# Force ephemeral file-based SQLite for tests — persists across engine instances
-# unlike :memory: which creates a new DB per connection.
-_db_path = Path(tempfile.gettempdir()) / "aec_test.db"
-_db_url = f"sqlite:///{_db_path.as_posix()}"
-os.environ["DATABASE_URL"] = _db_url
+# Ensure DATABASE_URL is set from .env before any app imports
+# The .env should contain Supabase connection string
+from app.db.session import get_engine
 
-# Clear cached engine AND settings so they pick up the override
-from app.db.session import get_engine  # noqa: E402
-from app.core.config import get_settings  # noqa: E402
 
-get_engine.cache_clear()
-get_settings.cache_clear()
+@pytest.fixture(scope="session")
+def engine():
+    """Session-scoped engine using Supabase from .env"""
+    return get_engine()
 
-# Import all models to register them with Base.metadata
-import app.db.models  # noqa: E402, F401
 
-from app.db.base import Base  # noqa: E402
+@pytest.fixture(scope="function")
+def db(engine):
+    """
+    Function-scoped database session with transaction rollback.
+    
+    Each test gets a clean database state by:
+    1. Starting a transaction
+    2. Running the test
+    3. Rolling back the transaction (discarding all changes)
+    
+    This provides isolation without needing separate schemas or databases.
+    """
+    connection = engine.connect()
+    transaction = connection.begin()
+    
+    # Create a session bound to this connection
+    session = Session(bind=connection, autoflush=False, autocommit=False, expire_on_commit=False)
+    
+    try:
+        yield session
+    finally:
+        session.close()
+        transaction.rollback()
+        connection.close()
 
-engine = get_engine()
-Base.metadata.create_all(engine)
+
+@pytest.fixture(scope="function")
+def db_with_commit(engine):
+    """
+    Alternative fixture for tests that need to commit (e.g., testing persistence).
+    Creates a savepoint, allows commit, then rolls back to savepoint.
+    """
+    connection = engine.connect()
+    transaction = connection.begin()
+    
+    session = Session(bind=connection, autoflush=False, autocommit=False, expire_on_commit=False)
+    
+    # Create a savepoint for nested transaction support
+    savepoint = connection.begin_nested()
+    
+    @event.listens_for(session, "after_transaction_end")
+    def restart_savepoint(session, transaction):
+        nonlocal savepoint
+        if transaction.nested and not transaction._parent.nested:
+            savepoint = connection.begin_nested()
+    
+    try:
+        yield session
+    finally:
+        event.remove(session, "after_transaction_end", restart_savepoint)
+        session.close()
+        transaction.rollback()
+        connection.close()
+
+
+# Helper for tests that need raw connection
+@pytest.fixture(scope="function")
+def connection(engine):
+    """Raw connection for tests needing direct SQL execution"""
+    conn = engine.connect()
+    try:
+        yield conn
+    finally:
+        conn.close()

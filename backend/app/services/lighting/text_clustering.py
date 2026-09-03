@@ -1,6 +1,6 @@
 import re
 import json
-from typing import List, Dict, Any
+from typing import List, Dict
 import pymupdf
 
 from .types import TextSpan, DALILoop, LINE_CLUSTER_TOL

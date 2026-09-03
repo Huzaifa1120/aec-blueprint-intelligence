@@ -19,7 +19,6 @@ Runs the synthetic plumbing/fire fixture through POST /api/e2e/run?persist=true
 
 from __future__ import annotations
 
-import os
 import shutil
 import uuid
 

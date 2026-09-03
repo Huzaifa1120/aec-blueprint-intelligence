@@ -23,18 +23,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    with op.batch_alter_table('estimates') as batch_op:
-        batch_op.add_column(
-            sa.Column(
-                'source_quality',
-                sa.String(length=20),
-                nullable=False,
-                server_default='layered_vector',
-            )
+    op.add_column(
+        'estimates',
+        sa.Column(
+            'source_quality',
+            sa.String(length=20),
+            nullable=False,
+            server_default='layered_vector',
         )
+    )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    with op.batch_alter_table('estimates') as batch_op:
-        batch_op.drop_column('source_quality')
+    op.drop_column('estimates', 'source_quality')

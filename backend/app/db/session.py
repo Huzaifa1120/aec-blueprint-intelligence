@@ -13,12 +13,7 @@ logger = logging.getLogger(__name__)
 @lru_cache
 def get_engine():
     settings = get_settings()
-    connect_args = (
-        {"check_same_thread": False}
-        if settings.database_url.startswith("sqlite")
-        else {}
-    )
-    engine = create_engine(settings.database_url, connect_args=connect_args)
+    engine = create_engine(settings.database_url)
     try:
         from app.db.validator import SchemaValidator
 

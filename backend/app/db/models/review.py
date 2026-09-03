@@ -36,7 +36,9 @@ class ReviewAction(Base):
     item_id: Mapped[str] = mapped_column(String(100))
     action: Mapped[str] = mapped_column(String(20))
     confidence_tier: Mapped[str] = mapped_column(String(20))
-    boq_item_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("boq_items.id"))
+    boq_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("boq_items.id", ondelete="SET NULL")
+    )
     reason: Mapped[str | None] = mapped_column(Text)
     corrected_value: Mapped[float | None]
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

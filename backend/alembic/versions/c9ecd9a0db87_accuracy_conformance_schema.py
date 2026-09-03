@@ -27,28 +27,33 @@ def upgrade() -> None:
     op.add_column('estimates', sa.Column('data_quality_json', sa.Text(), nullable=True))
     op.add_column('estimates', sa.Column('scale_status', sa.String(length=20), nullable=True))
     op.add_column('estimates', sa.Column('source_pdf_path', sa.String(length=500), nullable=True))
-    # Batch mode: SQLite has no ALTER ADD CONSTRAINT support (copy-and-move strategy)
-    with op.batch_alter_table('review_actions') as batch_op:
-        batch_op.add_column(sa.Column('boq_item_id', sa.Uuid(), nullable=True))
-        batch_op.add_column(sa.Column('reason', sa.Text(), nullable=True))
-        batch_op.add_column(sa.Column('corrected_value', sa.Float(), nullable=True))
-        batch_op.create_foreign_key(
-            'fk_review_actions_boq_item_id_boq_items',
-            'boq_items',
-            ['boq_item_id'],
-            ['id'],
-        )
+    
+    # Add columns to review_actions
+    op.add_column('review_actions', sa.Column('boq_item_id', sa.Uuid(), nullable=True))
+    op.add_column('review_actions', sa.Column('reason', sa.Text(), nullable=True))
+    op.add_column('review_actions', sa.Column('corrected_value', sa.Float(), nullable=True))
+    
+    # Create FK with ON DELETE SET NULL so deleting boq_items doesn't fail
+    op.create_foreign_key(
+        'fk_review_actions_boq_item_id_boq_items',
+        'review_actions',
+        'boq_items',
+        ['boq_item_id'],
+        ['id'],
+        ondelete='SET NULL'
+    )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    with op.batch_alter_table('review_actions') as batch_op:
-        batch_op.drop_constraint(
-            'fk_review_actions_boq_item_id_boq_items', type_='foreignkey'
-        )
-        batch_op.drop_column('corrected_value')
-        batch_op.drop_column('reason')
-        batch_op.drop_column('boq_item_id')
+    op.drop_constraint(
+        'fk_review_actions_boq_item_id_boq_items',
+        'review_actions',
+        type_='foreignkey'
+    )
+    op.drop_column('review_actions', 'corrected_value')
+    op.drop_column('review_actions', 'reason')
+    op.drop_column('review_actions', 'boq_item_id')
     op.drop_column('estimates', 'source_pdf_path')
     op.drop_column('estimates', 'scale_status')
     op.drop_column('estimates', 'data_quality_json')

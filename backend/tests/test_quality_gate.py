@@ -123,20 +123,13 @@ def test_classify_upload_reports_source_quality():
     assert result["degraded"] is False
 
 
-def test_boq_line_applies_degraded_confidence_multiplier():
+def test_boq_line_applies_degraded_confidence_multiplier(db):
     """Spec §4a: degraded-file measurements carry lower base confidence."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import Session as OrmSession
-
-    from app.db.base import Base
     from app.e2e.router import _boq_line
 
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    with OrmSession(engine) as session:
-        normal = _boq_line("lighting_outlet", "Lamp", 2.0, "MEASURED", ["p1"], session)
-        degraded = _boq_line("lighting_outlet", "Lamp", 2.0, "MEASURED", ["p1"], session,
-                             source_quality="degraded_vector")
+    normal = _boq_line("lighting_outlet", "Lamp", 2.0, "MEASURED", ["p1"], db)
+    degraded = _boq_line("lighting_outlet", "Lamp", 2.0, "MEASURED", ["p1"], db,
+                         source_quality="degraded_vector")
     assert normal["source_quality"] == "layered_vector"
     # contract change: spec conformance 2026-08-25 — BOQ lines are DERIVED (0.8), never MEASURED (1.0)
     assert normal["confidence_status"] == "DERIVED"

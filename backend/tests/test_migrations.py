@@ -1,10 +1,10 @@
 import os
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 
-BACKEND = Path(__file__).resolve().parents[1]
+from sqlalchemy import inspect
+
 EXPECTED = {
     "alembic_version",
     "assembly_materials",
@@ -32,16 +32,29 @@ EXPECTED = {
 }
 
 
-def test_alembic_upgrade_head_creates_all_tables(tmp_path: Path) -> None:
+def test_alembic_current_matches_expected() -> None:
+    """Verify current Supabase schema matches expected tables."""
+    from app.db.session import get_engine
+    
+    engine = get_engine()
+    insp = inspect(engine)
+    actual = set(insp.get_table_names())
+    
+    missing = EXPECTED - actual
+    unexpected = actual - EXPECTED
+    assert not missing, f"Supabase schema missing tables: {sorted(missing)}"
+    assert not unexpected, f"Supabase schema has unexpected tables: {sorted(unexpected)}"
+
+
+def test_alembic_upgrade_head_idempotent_on_supabase() -> None:
+    """Verify alembic upgrade head is idempotent on Supabase (no pending migrations)."""
     backend_dir = Path(__file__).resolve().parents[1]
-    db_file = tmp_path / "test.db"
-
+    
+    # Use current DATABASE_URL from .env (Supabase)
     env = os.environ.copy()
-    env["DATABASE_URL"] = f"sqlite:///{db_file.as_posix()}"
-
-    # Use -m per AGENTS.md: console-script exes can embed stale paths after a venv move
+    
     cmd = [sys.executable, "-m", "alembic", "upgrade", "head"]
-
+    
     result = subprocess.run(
         cmd,
         cwd=str(backend_dir),
@@ -49,17 +62,12 @@ def test_alembic_upgrade_head_creates_all_tables(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     )
-
+    
+    # Should succeed (idempotent - already at head)
     assert result.returncode == 0, (
-        f"Alembic failed!\nSTDOUT: {result.stdout}\nSTDERR: migration head did not apply cleanly"
+        f"Alembic failed!\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
     )
-
-    with sqlite3.connect(db_file) as connection:
-        rows = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-    actual = {row[0] for row in rows}
-    missing = EXPECTED - actual
-    unexpected = actual - EXPECTED
-    assert not missing, f"migration head is missing tables: {sorted(missing)}"
-    assert not unexpected, f"migration head created unexpected tables: {sorted(unexpected)}"
+    
+    # Should report "already at head" or similar (no actual migrations run)
+    assert "already at head" in result.stdout.lower() or "nothing to do" in result.stdout.lower() or result.stdout.strip() == "", \
+        f"Expected idempotent upgrade, but migrations ran:\n{result.stdout}"

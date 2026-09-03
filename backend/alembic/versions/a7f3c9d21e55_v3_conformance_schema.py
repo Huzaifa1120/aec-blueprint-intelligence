@@ -5,7 +5,6 @@ Revises: 5bf57251ec38
 Create Date: 2026-08-23
 
 """
-
 from typing import Sequence, Union
 
 from alembic import op
@@ -64,13 +63,19 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["space_id"], ["spaces.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    # Batch mode: SQLite has no ALTER ADD CONSTRAINT support (copy-and-move strategy)
+    
+    # Add layer_id column and FK to components, routes, spaces
     for table_name in ("components", "routes", "spaces"):
-        with op.batch_alter_table(table_name) as batch_op:
-            batch_op.add_column(sa.Column("layer_id", sa.Uuid(), nullable=True))
-            batch_op.create_foreign_key(
-                f"fk_{table_name}_layer_id_layers", "layers", ["layer_id"], ["id"]
-            )
+        op.add_column(table_name, sa.Column("layer_id", sa.Uuid(), nullable=True))
+        op.create_foreign_key(
+            f"fk_{table_name}_layer_id_layers",
+            table_name,
+            "layers",
+            ["layer_id"],
+            ["id"],
+            ondelete="SET NULL"
+        )
+    
     op.add_column(
         "sheets",
         sa.Column(
@@ -86,8 +91,12 @@ def downgrade() -> None:
     """Downgrade schema."""
     op.drop_column("sheets", "source_quality")
     for table_name in ("spaces", "routes", "components"):
-        with op.batch_alter_table(table_name) as batch_op:
-            batch_op.drop_column("layer_id")
+        op.drop_constraint(
+            f"fk_{table_name}_layer_id_layers",
+            table_name,
+            type_="foreignkey"
+        )
+        op.drop_column(table_name, "layer_id")
     op.drop_table("text_annotations")
     op.drop_table("schedule_blocks")
     op.drop_table("layers")

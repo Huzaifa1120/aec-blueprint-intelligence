@@ -25,21 +25,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    with op.batch_alter_table("routes") as batch_op:
-        batch_op.alter_column(
-            "size_json",
-            existing_type=sa.String(length=1000),
-            type_=sa.Text(),
-            existing_nullable=True,
-        )
+    op.alter_column(
+        "routes",
+        "size_json",
+        existing_type=sa.String(length=1000),
+        type_=sa.Text(),
+        existing_nullable=True,
+    )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    with op.batch_alter_table("routes") as batch_op:
-        batch_op.alter_column(
-            "size_json",
-            existing_type=sa.Text(),
-            type_=sa.String(length=1000),
-            existing_nullable=True,
-        )
+    op.alter_column(
+        "routes",
+        "size_json",
+        existing_type=sa.Text(),
+        type_=sa.String(length=1000),
+        existing_nullable=True,
+    )

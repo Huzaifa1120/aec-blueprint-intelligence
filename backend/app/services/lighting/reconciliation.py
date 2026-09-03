@@ -1,6 +1,6 @@
 import json
 import math
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Tuple
 import pymupdf
 
 from .types import (
