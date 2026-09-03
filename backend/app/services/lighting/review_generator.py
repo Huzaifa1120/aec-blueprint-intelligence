@@ -339,7 +339,6 @@ def generate_json_summary(
     return summary
 
 
-
 def create_review_artifacts(
     pdf_path: str,
     part_name: str,
@@ -351,7 +350,6 @@ def create_review_artifacts(
     from .legend_parser import parse_legend
     from .loop_quantifier import build_loop_zones, assign_symbols_to_zones
     from .text_clustering import extract_dali_loops
-    from .reconciliation import deduplicate_loops
     from .semantic_allocator import run_semantic_allocator
     
     doc = pymupdf.open(pdf_path)
@@ -367,13 +365,12 @@ def create_review_artifacts(
     specs = parse_legend(page)
     
     # V4: Loop quantifier
-    loops_raw = extract_dali_loops(page)
-    unique_loops, _ = deduplicate_loops(loops_raw)
-    zones = build_loop_zones(unique_loops, radius=4000.0)
+    loops_raw, discrepancies = extract_dali_loops(page)
+    zones = build_loop_zones(loops_raw, radius=800.0)
     assignments = assign_symbols_to_zones(symbols, zones, rooms)
     
     # V5: Semantic allocator
-    allocation_report = run_semantic_allocator(symbols, rooms, specs, assignments, zones)
+    allocation_report = run_semantic_allocator(symbols, rooms, specs, assignments, zones, page)
     
     # V6: Generate artifacts
     pdf_output = f"{output_dir}/{part_name}_review_overlay.pdf"

@@ -52,7 +52,7 @@ class LoopZone:
     loop_id: str
     centroid: Tuple[float, float]
     radius: float
-    capacity: int                            # text_quantity
+    capacity: int                            # enforced Top-K limit
     assigned_symbols: List[int] = field(default_factory=list)
 
 
@@ -61,17 +61,20 @@ class LoopZone:
 
 def build_loop_zones(loops: List[Dict[str, Any]],
                      radius: float = DEFAULT_LOOP_RADIUS) -> Dict[str, LoopZone]:
-    """Create a LoopZone per loop, centered at (X=0, Y=source_y).
+    """Create a LoopZone per spatially distinct loop.
 
-    The X of the loop label centroid is not directly stored on a DALILoop,
-    so we default to 0. The quantifier uses distance from this centroid
-    as the final tie-breaker; if X were available we would use it.
+    Uses composite key (loop_id, cluster_id) to preserve spatially distinct
+    zones sharing the same loop_id (e.g., two LOOP-12 zones at different locations).
     """
     zones: Dict[str, LoopZone] = {}
     for loop in loops:
-        zones[loop["loop"]] = LoopZone(
+        loop_id = loop["loop"]
+        cluster_id = loop.get("line_cluster_id", 0)
+        # Composite key: unique per spatial zone, preserves loop_id collisions
+        composite_key = f"{loop_id}_c{cluster_id}"
+        zones[composite_key] = LoopZone(
             loop_id=loop["loop"],
-            centroid=(0.0, float(loop["source_y"])),
+            centroid=(float(loop["source_x"]), float(loop["source_y"])),
             radius=radius,
             capacity=int(loop["quantity"]),
         )
@@ -168,66 +171,56 @@ def assign_symbols_to_zones(symbols: List[DenoisedSymbol],
                             zones: Dict[str, LoopZone],
                             rooms: List[RoomPolygon],
                             ) -> List[FixtureAssignment]:
-    """For each symbol, rank it against every zone, then greedily assign
-    the highest-scoring (symbol, zone) pair, respecting each zone's capacity.
-
-    The result is a FixtureAssignment per input symbol (with loop_id=None
-    for symbols that didn't fit in any zone's capacity).
+    """Top-K per-zone assignment: each zone takes its N highest-scoring symbols.
+    
+    Algorithm:
+    1. For each zone, score all symbols using the 4-factor cascade
+    2. Sort by score descending, take top N = zone.capacity
+    3. A symbol can only be assigned to ONE zone (highest score wins globally)
+    4. Unassigned symbols are discarded as CAD noise
     """
-    # Compute (score, symbol, zone) for every (symbol, zone) pair inside radius
-    candidates: List[Tuple[float, DenoisedSymbol, LoopZone]] = []
+    # Compute (score, symbol, zone) for every (symbol, zone) pair
+    candidates: List[Tuple[float, DenoisedSymbol, str, LoopZone, Dict[str, float]]] = []
     for sym in symbols:
-        for zone in zones.values():
-            if not _is_within_zone(sym, zone):
-                continue
+        for zid, zone in zones.items():
             breakdown = _score_symbol(sym, zone, rooms)
             score = _total_score(breakdown)
-            candidates.append((score, sym, zone))
+            candidates.append((score, sym, zid, zone, breakdown))
 
     # Sort by score descending, then by symbol id (deterministic tiebreak)
     candidates.sort(key=lambda c: (-c[0], c[1].id))
 
-    # Track capacity used per zone
-    used: Dict[str, int] = {zid: 0 for zid in zones}
-    assignments: Dict[int, FixtureAssignment] = {}
+    # Greedy assignment: each zone takes top-K, each symbol assigned at most once
+    assigned: Dict[int, FixtureAssignment] = {}
+    zone_taken: Dict[str, int] = {zid: 0 for zid in zones}
 
-    for rank, (score, sym, zone) in enumerate(candidates):
-        if sym.id in assignments:
-            continue  # already placed
-        if used[zone.loop_id] >= zone.capacity:
-            continue  # zone full
+    for score, sym, zid, zone, breakdown in candidates:
+        if sym.id in assigned:
+            continue  # symbol already assigned to higher-scoring zone
+        if zone_taken[zid] >= zone.capacity:
+            continue  # zone full (Top-K reached)
 
-        used[zone.loop_id] += 1
+        zone_taken[zid] += 1
         zone.assigned_symbols.append(sym.id)
-        assignments[sym.id] = FixtureAssignment(
+        assigned[sym.id] = FixtureAssignment(
             symbol_id=sym.id,
             loop_id=zone.loop_id,
-            rank=rank,
-            score_breakdown=_score_symbol(sym, zone, rooms),
+            rank=zone_taken[zid] - 1,  # 0-indexed rank within zone
+            score_breakdown=breakdown,
         )
 
     # Build result list in input symbol order
     result: List[FixtureAssignment] = []
     for sym in symbols:
-        if sym.id in assignments:
-            result.append(assignments[sym.id])
+        if sym.id in assigned:
+            result.append(assigned[sym.id])
         else:
-            # Unassigned — preserve the score_breakdown for the best zone
-            # so consumers can see why this symbol was dropped.
-            best = None
-            for zone in zones.values():
-                bd = _score_symbol(sym, zone, rooms)
-                s = _total_score(bd)
-                if best is None or s > best[0]:
-                    best = (s, bd, zone)
-            breakdown = best[1] if best is not None else {
-                k: 0.0 for k in TIE_BREAKER_PRIORITY
-            }
+            # Unassigned — discarded as noise
             result.append(FixtureAssignment(
                 symbol_id=sym.id,
                 loop_id=None,
                 rank=-1,
-                score_breakdown=breakdown,
+                score_breakdown={k: 0.0 for k in TIE_BREAKER_PRIORITY},
             ))
     return result
 

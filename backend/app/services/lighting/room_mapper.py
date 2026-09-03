@@ -97,8 +97,8 @@ def extract_room_codes(page: pymupdf.Page) -> List[Dict[str, Any]]:
     for b in blocks:
         if 'lines' not in b:
             continue
-        for l in b['lines']:
-            for s in l['spans']:
+        for line in b['lines']:
+            for s in line['spans']:
                 text = s['text'].strip()
                 if not text:
                     continue

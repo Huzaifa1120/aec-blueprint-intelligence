@@ -14,6 +14,7 @@ class DALILoop(TypedDict):
     part: str
     loop: str
     quantity: int
+    source_x: float
     source_y: float
     line_cluster_id: int
 

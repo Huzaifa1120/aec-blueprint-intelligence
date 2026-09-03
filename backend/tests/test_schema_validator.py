@@ -52,7 +52,7 @@ def test_validate_pre_migration_catches_drift():
     """Validator catches YAML column not in SQLAlchemy metadata."""
     from app.db.validator import SchemaValidator
 
-    metadata = SchemaValidator().schemas["projects"]
+    _metadata = SchemaValidator().schemas["projects"]
     # Create minimal metadata with just id and name (missing YAML columns)
     from sqlalchemy import MetaData, Table, Column, String
     metadata_obj = MetaData()

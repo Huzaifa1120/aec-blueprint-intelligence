@@ -38,11 +38,11 @@ def deduplicate_loops(loops: List[DALILoop]) -> Tuple[List[DALILoop], List[Dict]
     Returns (unique_loops, duplicate_info) where duplicate_info tracks merged entries.
     """
     grouped: Dict[tuple, List[DALILoop]] = {}
-    for l in loops:
-        key = (l['panel'], l['part'], l['loop'])
+    for loop in loops:
+        key = (loop['panel'], loop['part'], loop['loop'])
         if key not in grouped:
             grouped[key] = []
-        grouped[key].append(l)
+        grouped[key].append(loop)
     
     unique = []
     duplicate_info = []
@@ -78,7 +78,7 @@ def apply_ratios_to_loops(loops: List[DALILoop], ratios: Dict[str, float]) -> Li
     Apply emergency split ratios to each DALI loop's text quantity.
     Uses largest remainder method to preserve global totals.
     """
-    text_total = sum(l['quantity'] for l in loops)
+    text_total = sum(loop['quantity'] for loop in loops)
     
     # Global target counts
     global_targets = {}
@@ -93,7 +93,7 @@ def apply_ratios_to_loops(loops: List[DALILoop], ratios: Dict[str, float]) -> Li
         global_targets[largest_cls] += diff
     
     # Distribute to loops using largest remainder method
-    loop_allocations = {l['loop']: {cls: 0 for cls in EMERGENCY_CLASSES} for l in loops}
+    loop_allocations = {loop['loop']: {cls: 0 for cls in EMERGENCY_CLASSES} for loop in loops}
     
     for cls in EMERGENCY_CLASSES:
         target = global_targets[cls]
@@ -101,12 +101,12 @@ def apply_ratios_to_loops(loops: List[DALILoop], ratios: Dict[str, float]) -> Li
             continue
         
         exact_allocs = []
-        for l in loops:
-            exact = l['quantity'] * ratios.get(cls, 0)
+        for loop in loops:
+            exact = loop['quantity'] * ratios.get(cls, 0)
             base = int(math.floor(exact))
             remainder = exact - base
-            exact_allocs.append((l['loop'], base, remainder))
-            loop_allocations[l['loop']][cls] = base
+            exact_allocs.append((loop['loop'], base, remainder))
+            loop_allocations[loop['loop']][cls] = base
         
         allocated_cls = sum(a[1] for a in exact_allocs)
         remaining = target - allocated_cls
@@ -154,19 +154,19 @@ def generate_reconciliation_report(
 ) -> ReconciliationReport:
     """Generate the full reconciliation report."""
     
-    text_total = sum(l['quantity'] for l in unique_loops)
-    spatial_total = sum(l['spatial_count'] for l in loop_reconciliations)
+    text_total = sum(loop['quantity'] for loop in unique_loops)
+    spatial_total = sum(lr['spatial_count'] for lr in loop_reconciliations)
     
     totals = {
-        'CB': sum(l['cb_count'] for l in loop_reconciliations),
-        'EM': sum(l['em_count'] for l in loop_reconciliations),
-        'EMEM': sum(l['emem_count'] for l in loop_reconciliations),
-        'NORMAL': sum(l['normal_count'] for l in loop_reconciliations),
+        'CB': sum(lr['cb_count'] for lr in loop_reconciliations),
+        'EM': sum(lr['em_count'] for lr in loop_reconciliations),
+        'EMEM': sum(lr['emem_count'] for lr in loop_reconciliations),
+        'NORMAL': sum(lr['normal_count'] for lr in loop_reconciliations),
         'TEXT_TOTAL': text_total,
         'SPATIAL_TOTAL': spatial_total
     }
     
-    confidences = [l['confidence'] for l in loop_reconciliations]
+    confidences = [lr['confidence'] for lr in loop_reconciliations]
     confidence_summary = {
         'min': min(confidences) if confidences else 1.0,
         'max': max(confidences) if confidences else 1.0,
