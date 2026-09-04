@@ -34,9 +34,17 @@ def compute_emergency_ratios(instances: List[FixtureInstance]) -> Dict[str, floa
 
 def deduplicate_loops(loops: List[DALILoop]) -> Tuple[List[DALILoop], List[Dict]]:
     """
-    Merge duplicate loops (same panel, part, loop) by taking max quantity.
+    Merge duplicate loops that are SPATIALLY CLOSE (same panel, part, loop AND 
+    centroids within SPATIAL_TOL). Spatially distinct zones sharing the same 
+    loop_id (e.g., two LOOP-12 zones at different locations) are preserved as 
+    separate zones — this is a drawing labeling error, not a text-extraction 
+    duplicate.
+    
     Returns (unique_loops, duplicate_info) where duplicate_info tracks merged entries.
     """
+    SPATIAL_TOL = 50.0  # points - zones closer than this are text-extraction duplicates
+    
+    # Group by (panel, part, loop) first
     grouped: Dict[tuple, List[DALILoop]] = {}
     for loop in loops:
         key = (loop['panel'], loop['part'], loop['loop'])
@@ -51,17 +59,58 @@ def deduplicate_loops(loops: List[DALILoop]) -> Tuple[List[DALILoop], List[Dict]
         if len(entries) == 1:
             unique.append(entries[0])
         else:
-            # Multiple entries - take max quantity, flag others
-            max_entry = max(entries, key=lambda e: e['quantity'])
-            unique.append(max_entry)
-            duplicate_info.append({
-                'panel': key[0],
-                'part': key[1],
-                'loop': key[2],
-                'quantities': [e['quantity'] for e in entries],
-                'chosen_quantity': max_entry['quantity'],
-                'clusters': [e['line_cluster_id'] for e in entries]
-            })
+            # Multiple entries with same loop_id - deduplicate SPATIALLY
+            # Only merge entries whose centroids are within SPATIAL_TOL
+            sorted_entries = sorted(entries, key=lambda e: (e['source_x'], e['source_y']))
+            
+            zones_for_loop = []
+            for entry in sorted_entries:
+                matched_zone = None
+                for zone in zones_for_loop:
+                    dx = abs(entry['source_x'] - zone['source_x'])
+                    dy = abs(entry['source_y'] - zone['source_y'])
+                    if dx <= SPATIAL_TOL and dy <= SPATIAL_TOL:
+                        matched_zone = zone
+                        break
+                
+                if matched_zone:
+                    # Same location - text-extraction duplicate, keep higher quantity
+                    if entry['quantity'] > matched_zone['quantity']:
+                        matched_zone.update({
+                            'quantity': entry['quantity'],
+                            'line_cluster_id': entry['line_cluster_id'],
+                        })
+                else:
+                    zones_for_loop.append(entry)
+            
+            # Add all spatially distinct zones for this loop_id
+            unique.extend(zones_for_loop)
+            
+            # Flag if this loop_id had multiple SPATIALLY DISTINCT zones (drawing discrepancy)
+            if len(zones_for_loop) > 1:
+                details = "; ".join(
+                    f"at ({z['source_x']:.1f}, {z['source_y']:.1f}) qty={z['quantity']}"
+                    for z in zones_for_loop
+                )
+                duplicate_info.append({
+                    'type': 'DRAWING_DISCREPANCY',
+                    'loop_id': key[2],
+                    'message': f"Loop ID '{key[2]}' appears in {len(zones_for_loop)} spatially distinct zones: {details}",
+                    'zones': zones_for_loop
+                })
+            # If multiple entries merged into one zone, flag as text-extraction duplicate
+            elif len(zones_for_loop) < len(entries):
+                merged_quantities = [e['quantity'] for e in entries]
+                chosen_qty = max(merged_quantities)
+                duplicate_info.append({
+                    'type': 'TEXT_DUPLICATE_MERGED',
+                    'panel': key[0],
+                    'part': key[1],
+                    'loop': key[2],
+                    'quantities': merged_quantities,
+                    'chosen_quantity': chosen_qty,
+                    'clusters': [e['line_cluster_id'] for e in entries]
+                })
     
     # Sort by loop number
     def loop_num_key(loop_str: str) -> int:
@@ -271,7 +320,7 @@ def process_lighting_pdf(pdf_path: str, part_name: str, output_dir: str = "data/
     page = doc[0]
     
     # Step 1: Extract DALI loops (ground truth quantities)
-    original_loops = extract_dali_loops(page)
+    original_loops, _ = extract_dali_loops(page)
     save_loops_json(original_loops, "%s/%s_loops.json" % (output_dir, part_name))
     
     # Step 1b: Deduplicate loops for ratio application

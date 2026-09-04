@@ -802,7 +802,7 @@ def e2e_run_body(
             lighting_symbols = extract_denoised_symbols(page)
             lighting_rooms = build_room_polygons(page)
             lighting_specs = parse_legend(page)
-            lighting_loops_raw = extract_dali_loops(page)
+            lighting_loops_raw, _ = extract_dali_loops(page)
             lighting_unique_loops, _ = deduplicate_loops(lighting_loops_raw)
             lighting_zones = build_loop_zones(lighting_unique_loops, radius=4000.0)
             assign_symbols_to_zones(lighting_symbols, lighting_zones, lighting_rooms)

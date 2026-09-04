@@ -64,7 +64,7 @@ def _load_all():
         specs = parse_legend(page)
 
         # V4: Loop zones
-        loops_raw = extract_dali_loops(page)
+        loops_raw, _ = extract_dali_loops(page)
         unique_loops, _ = deduplicate_loops(loops_raw)
         zones = build_loop_zones(unique_loops, radius=4000.0)
         assign_symbols_to_zones(symbols, zones, rooms)

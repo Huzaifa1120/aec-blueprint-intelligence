@@ -246,17 +246,11 @@ def point_in_polygon(point: Tuple[float, float], polygon: List[Tuple[float, floa
 
 def assign_symbol_to_room(symbol_centroid: Tuple[float, float], 
                           rooms: List[RoomPolygon]) -> Optional[RoomPolygon]:
+    """Assign symbol to room ONLY if it's inside the room polygon.
+    Returns None if symbol is not inside any room polygon (no nearest-neighbor fallback)."""
     for room in rooms:
         if point_in_polygon(symbol_centroid, room.polygon):
             return room
-    
-    if rooms:
-        best_room = min(rooms, key=lambda r: math.hypot(
-            symbol_centroid[0] - r.centroid[0],
-            symbol_centroid[1] - r.centroid[1]
-        ))
-        return best_room
-    
     return None
 
 

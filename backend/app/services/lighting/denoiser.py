@@ -24,7 +24,6 @@ AREA_WINDOWS = {
     "hexagon": (60.0, 75.0),
     "nonagon": (155.0, 185.0),
 }
-PLAN_Y_MIN = 600.0
 
 VALID_SIGNATURES = {
     ("c", "c", "c", "c"): "circle",
@@ -57,10 +56,6 @@ def extract_denoised_symbols(page: pymupdf.Page) -> List[DenoisedSymbol]:
         
         lo, hi = AREA_WINDOWS[shape]
         if not (lo <= area <= hi):
-            continue
-        
-        cy = (rect.y0 + rect.y1) / 2
-        if cy <= PLAN_Y_MIN:
             continue
         
         color = d.get("color")

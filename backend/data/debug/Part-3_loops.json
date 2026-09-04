@@ -1,0 +1,38 @@
+[
+  {
+    "panel": "LCP-L2/03",
+    "part": "PART-3",
+    "loop": "DALI LOOP-02",
+    "quantity": 25,
+    "source_x": 737.8887634277344,
+    "source_y": 472.47998046875,
+    "line_cluster_id": 59
+  },
+  {
+    "panel": "LCP-L2/03",
+    "part": "PART-3",
+    "loop": "DALI LOOP-01",
+    "quantity": 43,
+    "source_x": 1136.4645568847657,
+    "source_y": 487.096142578125,
+    "line_cluster_id": 64
+  },
+  {
+    "panel": "LCP-L2/03",
+    "part": "PART-3",
+    "loop": "DALI LOOP-04",
+    "quantity": 22,
+    "source_x": 1104.5348754882812,
+    "source_y": 1094.20009765625,
+    "line_cluster_id": 197
+  },
+  {
+    "panel": "LCP-L2/03",
+    "part": "PART-3",
+    "loop": "DALI LOOP-03",
+    "quantity": 26,
+    "source_x": 1479.2261962890625,
+    "source_y": 1652.5200602213542,
+    "line_cluster_id": 318
+  }
+]

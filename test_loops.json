@@ -1,0 +1,137 @@
+[
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-12",
+    "quantity": 28,
+    "source_x": 449.4227076939174,
+    "source_y": 777.2528250558036,
+    "line_cluster_id": 148
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-12",
+    "quantity": 26,
+    "source_x": 1157.6713104248047,
+    "source_y": 319.6020812988281,
+    "line_cluster_id": 35
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-13",
+    "quantity": 37,
+    "source_x": 1135.3688557942708,
+    "source_y": 349.2400309244792,
+    "line_cluster_id": 43
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-9",
+    "quantity": 33,
+    "source_x": 960.6746429443359,
+    "source_y": 450.6777099609375,
+    "line_cluster_id": 63
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-4",
+    "quantity": 37,
+    "source_x": 973.3210849761963,
+    "source_y": 626.7175445556641,
+    "line_cluster_id": 103
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-15",
+    "quantity": 16,
+    "source_x": 950.8040500217014,
+    "source_y": 837.86669921875,
+    "line_cluster_id": 161
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-11",
+    "quantity": 28,
+    "source_x": 587.2945251464844,
+    "source_y": 1025.4400227864583,
+    "line_cluster_id": 208
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-14",
+    "quantity": 16,
+    "source_x": 891.7214965820312,
+    "source_y": 1084.4200439453125,
+    "line_cluster_id": 222
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-10",
+    "quantity": 28,
+    "source_x": 582.2205429077148,
+    "source_y": 1255.4518280029297,
+    "line_cluster_id": 260
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-03",
+    "quantity": 36,
+    "source_x": 867.8679787772043,
+    "source_y": 1508.0714808872767,
+    "line_cluster_id": 329
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-08",
+    "quantity": 34,
+    "source_x": 216.85830688476562,
+    "source_y": 1610.6800537109375,
+    "line_cluster_id": 350
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-02",
+    "quantity": 36,
+    "source_x": 720.9783020019531,
+    "source_y": 1929.8200073242188,
+    "line_cluster_id": 410
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-06",
+    "quantity": 40,
+    "source_x": 491.35829162597656,
+    "source_y": 1934.0200805664062,
+    "line_cluster_id": 411
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-01",
+    "quantity": 33,
+    "source_x": 1173.25830078125,
+    "source_y": 1935.760009765625,
+    "line_cluster_id": 412
+  },
+  {
+    "panel": "LCP-L2/01",
+    "part": "PART-1",
+    "loop": "DALI LOOP-05",
+    "quantity": 14,
+    "source_x": 977.4183044433594,
+    "source_y": 1944.4600219726562,
+    "line_cluster_id": 414
+  }
+]
