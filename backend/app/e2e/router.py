@@ -795,6 +795,7 @@ def e2e_run_body(
         )
         from app.services.lighting.text_clustering import extract_dali_loops
         from app.services.lighting.reconciliation import deduplicate_loops
+        from app.services.lighting.semantic_allocator import run_semantic_allocator
 
         doc = pymupdf.open(file_path)
         page = doc[0]
@@ -806,7 +807,14 @@ def e2e_run_body(
             lighting_unique_loops, _ = deduplicate_loops(lighting_loops_raw)
             lighting_zones = build_loop_zones(lighting_unique_loops, radius=4000.0)
             assign_symbols_to_zones(lighting_symbols, lighting_zones, lighting_rooms)
-            lighting_rows = build_lighting_boq(lighting_symbols, lighting_rooms, lighting_specs, lighting_zones)
+            allocation_report = run_semantic_allocator(
+                lighting_symbols, lighting_rooms, lighting_specs, 
+                assign_symbols_to_zones(lighting_symbols, lighting_zones, lighting_rooms),
+                lighting_zones, page
+            )
+            lighting_rows = build_lighting_boq(
+                lighting_symbols, lighting_rooms, lighting_specs, lighting_zones, allocation_report
+            )
 
             for row in lighting_rows:
                 boq_items.append({

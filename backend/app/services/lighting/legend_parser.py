@@ -3,15 +3,19 @@
 Parses the fixture schedule (legend) at the bottom of the page (Y ≈ 2900-3100).
 The legend has symbol codes (R1, R2, C1, S1, W1, L1, EM1, etc.) at Y≈2970,
 with their descriptions at Y≈3025 containing IP, wattage, dimensions, DALI driver info.
-DITTO AS ABOVE markers indicate inheritance from the previous spec.
+DITTO AS ABOVE markers indicate inheritance from the previous spec in the SAME SERIES.
 
 Note: Description text is vertical (rotated), so spans have tall bboxes (y0≈3025, y1≈3175+).
 Use TOP Y (y0) for matching, not center Y.
+
+Layout: The legend is organized in vertical columns by series (R, C, S, W, L from right to left).
+Within each column, codes go R7→R1, C5→C1, S3→S1, W3→W1, L2→L1 (descending numbers).
+CB variants (R1CB, C1CB, etc.) are DITTO rows that inherit from their base code (R1, C1, etc.).
 """
 import re
-from collections import Counter
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 import pymupdf
 
@@ -93,7 +97,7 @@ SHAPE_HINTS_BY_KEYWORD = {
 @dataclass
 class FixtureSpec:
     code: str                       # e.g. "R1", "C1", "EM1"
-    description: str                # Full description text
+    description: str                # Full concatenated description text
     wattage: Optional[int]          # e.g. 36
     dimensions: Optional[str]       # e.g. "600x600"
     ip_rating: Optional[str]        # e.g. "IP65"
@@ -118,9 +122,6 @@ class FixtureSpec:
             "mount": self.mount,
             "row_y": self.row_y,
         }
-
-
-# ---------- Helpers ----------
 
 
 def _extract_legend_spans(page: pymupdf.Page) -> List[Dict[str, Any]]:
@@ -153,6 +154,20 @@ def _extract_legend_spans(page: pymupdf.Page) -> List[Dict[str, Any]]:
     return out
 
 
+def _parse_symbol_code(code: str) -> Tuple[str, int, bool]:
+    """Parse symbol code into (series, number, is_cb_variant).
+    e.g. 'R1CB' -> ('R', 1, True), 'S3' -> ('S', 3, False), 'W2' -> ('W', 2, False)
+    """
+    # Extract series letter
+    series = code[0]
+    # Extract number
+    num_match = re.search(r'(\d+)', code)
+    number = int(num_match.group(1)) if num_match else 0
+    # Check for CB variant
+    is_cb = code.endswith('CB')
+    return series, number, is_cb
+
+
 def _find_symbol_anchors(spans: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Find symbol code anchors (R1, C1, S1, W1, L1, EM1, etc.) in the legend."""
     anchors = []
@@ -160,9 +175,11 @@ def _find_symbol_anchors(spans: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if SYMBOL_CODE_PATTERN.match(s["text"]):
             # Symbol codes are at Y ≈ 2975 (larger font ~4.1pt)
             if abs(s["y0"] - SYMBOL_Y) <= SYMBOL_Y_TOL and s["size"] >= 3.5:
+                series, number, is_cb = _parse_symbol_code(s["text"])
+                s["series"] = series
+                s["number"] = number
+                s["is_cb"] = is_cb
                 anchors.append(s)
-    # Sort by X position (left to right)
-    anchors.sort(key=lambda a: a["cx"])
     return anchors
 
 
@@ -186,14 +203,86 @@ def _find_descriptions(spans: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return descs
 
 
-def _match_description_to_symbol(symbol_x: float, descriptions: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Match a symbol to its description by closest X position."""
-    if not descriptions:
-        return None
-    best = min(descriptions, key=lambda d: abs(d["cx"] - symbol_x))
-    if abs(best["cx"] - symbol_x) <= 50:  # Within 50pt horizontally
-        return best
-    return None
+def _group_anchors_by_series(anchors: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Group anchors by series (R, C, S, W, L) and sort each series by logical order.
+    
+    Logical order: descending number (R7, R6, R5, R4, R3, R2, R1) with CB variants
+    grouped with their base code. For W series: W3, W2, W1. For L: L2, L1.
+    """
+    by_series = defaultdict(list)
+    for a in anchors:
+        by_series[a["series"]].append(a)
+    
+    # Sort each series: primary by number DESC, secondary by is_cb (base before CB)
+    for series, items in by_series.items():
+        def sort_key(item):
+            # Base codes (is_cb=False) come before CB variants of same number
+            return (-item["number"], 1 if item["is_cb"] else 0)
+        items.sort(key=sort_key)
+    
+    return by_series
+
+
+def _compute_2d_bounds(anchors: List[Dict[str, Any]]) -> Dict[str, Dict[str, Tuple[float, float]]]:
+    """Compute 2D midpoint bounds for each anchor.
+    
+    Returns dict mapping code -> {"x": (left, right), "y": (upper, lower)}.
+    """
+    # Collect all unique X coordinates
+    all_x = sorted([a['cx'] for a in anchors])
+    # Collect all unique Y coordinates (using y0 rounded to 1 decimal)
+    all_y = sorted(list(set(round(a['y0'], 1) for a in anchors)))
+    
+    bounds = {}
+    for a in anchors:
+        code = a['text']
+        x = a['cx']
+        y = round(a['y0'], 1)
+        i_x = all_x.index(x)
+        i_y = all_y.index(y)
+        left = (all_x[i_x-1] + x) / 2 if i_x > 0 else x - 25
+        right = (x + all_x[i_x+1]) / 2 if i_x < len(all_x) - 1 else x + 25
+        upper = (all_y[i_y-1] + y) / 2 if i_y > 0 else y - 5
+        lower = (y + all_y[i_y+1]) / 2 if i_y < len(all_y) - 1 else y + 5
+        bounds[code] = {"x": (left, right), "y": (upper, lower)}
+    return bounds
+
+
+def _collect_description_block(
+    symbol_x: float,
+    symbol_series: str,
+    symbol_number: int,
+    next_symbol_x: Optional[float],
+    descriptions: List[Dict[str, Any]],
+    all_anchors: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Collect ALL description spans belonging to a symbol's 2D cell.
+    
+    Uses mathematical midpoints between adjacent symbol anchors in BOTH
+    X and Y dimensions to define strict cell boundaries.
+    """
+    # Compute 2D bounds for all anchors
+    bounds_2d = _compute_2d_bounds(all_anchors)
+    
+    # Find the anchor for this symbol to get its bounds
+    anchor = next((a for a in all_anchors if a['text'] == f"{symbol_series}{symbol_number}") or 
+                  (a for a in all_anchors if a['text'] == f"{symbol_series}{symbol_number}CB"), None)
+    if not anchor:
+        # Fallback to old logic if anchor not found
+        left_bound = symbol_x - 40
+        right_bound = next_symbol_x if next_symbol_x is not None else LEGEND_X_MAX + 50
+    else:
+        bounds = bounds_2d.get(anchor['text'], {"x": (symbol_x - 40, symbol_x + 40), "y": (2850.0, 3100.0)})
+        left_bound, right_bound = bounds["x"]
+    
+    block = []
+    for d in descriptions:
+        if left_bound <= d["cx"] <= right_bound:
+            block.append(d)
+    
+    # Sort by reading order: top-to-bottom (y0 ascending for vertical text)
+    block.sort(key=lambda d: d["y0"])
+    return block
 
 
 def _extract_attributes(text: str) -> Dict[str, Any]:
@@ -268,67 +357,102 @@ def _has_emergency(symbol_code: str, symbol_x: float, cb_map: Dict[float, str]) 
     return False
 
 
-# ---------- Main API ----------
-
-
 def parse_legend(page: pymupdf.Page) -> List[FixtureSpec]:
-    """Parse the fixture schedule (legend) at bottom of page (Y ≈ 2900-3100)."""
+    """Parse the fixture schedule (legend) at bottom of page (Y ≈ 2900-3100).
+    
+    New logic:
+    1. Group symbol anchors by series (R, C, S, W, L)
+    2. Sort each series in logical order (descending number, base before CB)
+    3. For each series, process in logical order maintaining prev_attrs per series
+    4. Collect ALL description spans in each symbol's 2D cell (midpoint-bounded)
+    5. Concatenate description lines in reading order (top-to-bottom)
+    """
     spans = _extract_legend_spans(page)
     anchors = _find_symbol_anchors(spans)
     cb_map = _find_cb_markers(spans)
     descriptions = _find_descriptions(spans)
-
+    
+    # Group by series and sort logically
+    by_series = _group_anchors_by_series(anchors)
+    
+    # Pre-compute 2D bounds for all anchors
+    bounds_2d = _compute_2d_bounds(anchors)
+    
     specs: List[FixtureSpec] = []
-    prev_attrs: Optional[Dict[str, Any]] = None
-
-    for anchor in anchors:
-        code = anchor["text"]
-        symbol_x = anchor["cx"]
-        symbol_y = anchor["y0"]
-
-        # Match to description
-        desc_span = _match_description_to_symbol(symbol_x, descriptions)
-        if desc_span:
-            desc_text = desc_span["text"]
-            attrs = _extract_attributes(desc_text)
-        else:
-            desc_text = ""
-            attrs = {"ip_rating": None, "wattage": None, "dimensions": None,
-                     "driver": None, "mount": None, "conversion_pct": None, "is_ditto": False}
-
-        # Handle DITTO AS ABOVE - inherit from previous spec
-        if attrs["is_ditto"] and prev_attrs is not None:
-            # Inherit IP, wattage, dimensions, driver, mount, shape from previous
-            for key in ["ip_rating", "wattage", "dimensions", "driver", "mount"]:
-                if attrs[key] is None:
-                    attrs[key] = prev_attrs.get(key)
-            # Keep conversion_pct from DITTO line (e.g., 25% conversion)
-            description = desc_text
-        else:
-            description = desc_text
-            prev_attrs = attrs.copy()
-
-        # Shape hint
-        shape_hint = _infer_shape_hint(description)
-
-        # Emergency
-        has_emergency = _has_emergency(code, symbol_x, cb_map)
-
-        spec = FixtureSpec(
-            code=code,
-            description=description,
-            wattage=attrs["wattage"],
-            dimensions=attrs["dimensions"],
-            ip_rating=attrs["ip_rating"],
-            shape_hint=shape_hint,
-            driver=attrs["driver"],
-            conversion_pct=attrs["conversion_pct"],
-            has_emergency=has_emergency,
-            mount=attrs["mount"],
-            row_y=symbol_y,
-        )
-        specs.append(spec)
-
+    # prev_attrs per series
+    prev_attrs_by_series: Dict[str, Optional[Dict[str, Any]]] = {s: None for s in by_series.keys()}
+    
+    for series, series_anchors in by_series.items():
+        for idx, anchor in enumerate(series_anchors):
+            code = anchor["text"]
+            symbol_x = anchor["cx"]
+            symbol_y = anchor["y0"]
+            
+            # Get 2D bounds for THIS specific anchor (including CB variants)
+            bounds = bounds_2d.get(code, {"x": (symbol_x - 40, symbol_x + 40), "y": (2850.0, 3100.0)})
+            left_bound, right_bound = bounds["x"]
+            
+            # Collect ALL description spans in this symbol's 2D cell
+            block = []
+            for d in descriptions:
+                if left_bound <= d["cx"] <= right_bound:
+                    block.append(d)
+            
+            # Sort by reading order: top-to-bottom (y0 ascending for vertical text)
+            block.sort(key=lambda d: d["y0"])
+            desc_block = block
+            
+            # Concatenate description texts in reading order (top-to-bottom)
+            if desc_block:
+                desc_texts = [d["text"] for d in desc_block]
+                full_description = " | ".join(desc_texts)
+                # Extract attributes from concatenated text
+                combined_text = " ".join(desc_texts)
+                attrs = _extract_attributes(combined_text)
+            else:
+                full_description = ""
+                attrs = {"ip_rating": None, "wattage": None, "dimensions": None,
+                         "driver": None, "mount": None, "conversion_pct": None, "is_ditto": False}
+            
+            # Handle DITTO AS ABOVE - inherit from previous spec in SAME SERIES
+            if attrs["is_ditto"] and prev_attrs_by_series[series] is not None:
+                parent_attrs = prev_attrs_by_series[series]
+                # Inherit IP, wattage, dimensions, driver, mount, shape from parent
+                for key in ["ip_rating", "wattage", "dimensions", "driver", "mount"]:
+                    if attrs[key] is None:
+                        attrs[key] = parent_attrs.get(key)
+                # Keep conversion_pct from DITTO line
+                description = full_description
+            else:
+                description = full_description
+                # Update prev_attrs for this series (only for non-DITTO base codes)
+                if not attrs["is_ditto"]:
+                    prev_attrs_by_series[series] = attrs.copy()
+            
+            # Shape hint from concatenated description
+            shape_hint = _infer_shape_hint(description)
+            
+            # Emergency
+            has_emergency = _has_emergency(code, symbol_x, cb_map)
+            
+            spec = FixtureSpec(
+                code=code,
+                description=description,
+                wattage=attrs["wattage"],
+                dimensions=attrs["dimensions"],
+                ip_rating=attrs["ip_rating"],
+                shape_hint=shape_hint,
+                driver=attrs["driver"],
+                conversion_pct=attrs["conversion_pct"],
+                has_emergency=has_emergency,
+                mount=attrs["mount"],
+                row_y=symbol_y,
+            )
+            specs.append(spec)
+    
+    # Sort final specs back to original X-order for consistent output
+    specs.sort(key=lambda s: next((a["cx"] for a in anchors if a["text"] == s.code), 0))
+    
     return specs
 
 
@@ -354,6 +478,7 @@ def query_specs(
 
 def get_legend_stats(specs: List[FixtureSpec]) -> Dict[str, Any]:
     """Return summary statistics for a parsed legend."""
+    from collections import Counter
     shape_counts = Counter(s.shape_hint for s in specs)
     ip_counts = Counter(s.ip_rating or "unknown" for s in specs)
     em_counts = Counter(s.has_emergency for s in specs)

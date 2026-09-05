@@ -119,14 +119,24 @@ def generate_review_pdf(
             fontsize=8, color=(0.3, 0.3, 0.3)
         )
     
-    # Draw loop zone boundaries
+    # Draw loop zone boundaries using physical fixture centroid (not text label)
     for zone in zones.values():
-        # Draw circle at zone centroid with radius
-        cx, cy = zone.centroid
+        # Compute physical centroid from assigned fixtures
+        assigned_sym_ids = zone.assigned_symbols
+        assigned_symbols = [s for s in symbols if s.id in assigned_sym_ids]
+        if assigned_symbols:
+            fx = sum(s.centroid[0] for s in assigned_symbols) / len(assigned_symbols)
+            fy = sum(s.centroid[1] for s in assigned_symbols) / len(assigned_symbols)
+            physical_centroid = (fx, fy)
+        else:
+            physical_centroid = zone.centroid  # fallback to text label if no fixtures
+        
+        # Draw circle at PHYSICAL centroid with radius
+        cx, cy = physical_centroid
         new_page.draw_circle((cx, cy), zone.radius, color=(0.0, 0.0, 1.0), width=1.5)
         new_page.draw_circle((cx, cy), zone.radius, color=(0.0, 0.0, 1.0), fill_opacity=0.02)
         
-        # Loop label
+        # Loop label at physical centroid
         new_page.insert_text(
             (cx + zone.radius + 10, cy),
             f"LOOP: {zone.loop_id} (cap={zone.capacity}, used={len(zone.assigned_symbols)})",
@@ -274,6 +284,7 @@ def generate_json_summary(
     zones: Dict[str, LoopZone],
     rooms: List[RoomPolygon],
     specs: List[FixtureSpec],
+    symbols: List[DenoisedSymbol],
     output_path: str,
 ) -> Dict[str, Any]:
     """Generate the JSON summary for programmatic review."""
@@ -300,6 +311,10 @@ def generate_json_summary(
                 "assigned": len(zone.assigned_symbols),
                 "utilization": round(len(zone.assigned_symbols) / zone.capacity * 100, 1) if zone.capacity > 0 else 0,
                 "centroid": zone.centroid,
+                "physical_centroid": (
+                    sum(s.centroid[0] for s in symbols if s.id in zone.assigned_symbols) / len(zone.assigned_symbols),
+                    sum(s.centroid[1] for s in symbols if s.id in zone.assigned_symbols) / len(zone.assigned_symbols)
+                ) if zone.assigned_symbols else zone.centroid,
                 "radius": zone.radius,
             }
             for loop_id, zone in zones.items()
@@ -381,7 +396,7 @@ def create_review_artifacts(
     )
     
     json_summary = generate_json_summary(
-        allocation_report, zones, rooms, specs, json_output
+        allocation_report, zones, rooms, specs, symbols, json_output
     )
     
     doc.close()

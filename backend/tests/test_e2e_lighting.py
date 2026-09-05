@@ -15,6 +15,7 @@ from app.services.lighting.legend_parser import parse_legend
 from app.services.lighting.text_clustering import extract_dali_loops
 from app.services.lighting.reconciliation import deduplicate_loops
 from app.services.lighting.loop_quantifier import build_loop_zones, assign_symbols_to_zones
+from app.services.lighting.semantic_allocator import run_semantic_allocator
 from app.e2e.lighting import build_lighting_boq, LightingBoqRow
 
 SAMPLE_PDF = "../data/samples/P0050-AMC-A-E2-2F-EL-122-02-B, Lighting Layout, 2nd Floor, Part-1.pdf"
@@ -69,8 +70,13 @@ def _load_all():
         zones = build_loop_zones(unique_loops, radius=4000.0)
         assign_symbols_to_zones(symbols, zones, rooms)
 
+        # V5: Semantic allocator
+        allocation_report = run_semantic_allocator(symbols, rooms, specs, 
+            assign_symbols_to_zones(symbols, zones, rooms),
+            zones, page)
+
         doc.close()
-        return symbols, rooms, specs, zones
+        return symbols, rooms, specs, zones, allocation_report
     except Exception:
         doc.close()
         raise
@@ -87,8 +93,8 @@ def _denoised_shape_to_type(shape: str) -> str:
 
 def test_build_lighting_boq_with_real_part1_returns_nonempty():
     """Returns ≥1 LightingBoqRow for the real Part-1 PDF."""
-    symbols, rooms, specs, zones = _load_all()
-    rows = build_lighting_boq(symbols, rooms, specs, zones)
+    symbols, rooms, specs, zones, allocation_report = _load_all()
+    rows = build_lighting_boq(symbols, rooms, specs, zones, allocation_report)
     assert len(rows) >= 1, f"Expected ≥1 rows, got {len(rows)}"
     for row in rows:
         assert isinstance(row, LightingBoqRow)
@@ -96,8 +102,8 @@ def test_build_lighting_boq_with_real_part1_returns_nonempty():
 
 def test_build_lighting_boq_respects_loop_capacity():
     """Total quantity ≤ sum of zone capacities."""
-    symbols, rooms, specs, zones = _load_all()
-    rows = build_lighting_boq(symbols, rooms, specs, zones)
+    symbols, rooms, specs, zones, allocation_report = _load_all()
+    rows = build_lighting_boq(symbols, rooms, specs, zones, allocation_report)
     total_qty = sum(row.quantity for row in rows)
     total_capacity = sum(z.capacity for z in zones.values())
     assert total_qty <= total_capacity, (
@@ -107,16 +113,16 @@ def test_build_lighting_boq_respects_loop_capacity():
 
 def test_build_lighting_boq_emits_unpriced_flag_when_catalog_missing():
     """unit_price is None for all rows (no catalog hardcode)."""
-    symbols, rooms, specs, zones = _load_all()
-    rows = build_lighting_boq(symbols, rooms, specs, zones)
+    symbols, rooms, specs, zones, allocation_report = _load_all()
+    rows = build_lighting_boq(symbols, rooms, specs, zones, allocation_report)
     for row in rows:
         assert row.unit_price is None, f"Expected unpriced (None), got {row.unit_price}"
 
 
 def test_build_lighting_boq_derives_confidence_from_v4_breakdown():
     """Confidence > 0.4 AND at least one V4 factor > 0 (proves markers+rooms wired per F3)."""
-    symbols, rooms, specs, zones = _load_all()
-    rows = build_lighting_boq(symbols, rooms, specs, zones)
+    symbols, rooms, specs, zones, allocation_report = _load_all()
+    rows = build_lighting_boq(symbols, rooms, specs, zones, allocation_report)
     # At least one row must have confidence > 0.4
     high_conf = [r for r in rows if r.confidence_score > 0.4]
     assert len(high_conf) >= 1, (
@@ -137,17 +143,17 @@ def test_build_lighting_boq_derives_confidence_from_v4_breakdown():
 
 def test_build_lighting_boq_returns_empty_when_no_dali_loops():
     """Degenerate input (no loops) → empty list."""
-    symbols, rooms, specs, _ = _load_all()
+    symbols, rooms, specs, _, allocation_report = _load_all()
     # Pass empty zones
     empty_zones = {}
-    rows = build_lighting_boq(symbols, rooms, specs, empty_zones)
+    rows = build_lighting_boq(symbols, rooms, specs, empty_zones, None)
     assert rows == []
 
 
 def test_build_lighting_boq_uses_v3_spec_code():
     """spec_code comes from V3 parsed set or 'unknown'."""
-    symbols, rooms, specs, zones = _load_all()
-    rows = build_lighting_boq(symbols, rooms, specs, zones)
+    symbols, rooms, specs, zones, allocation_report = _load_all()
+    rows = build_lighting_boq(symbols, rooms, specs, zones, allocation_report)
     # Every row must have a spec_code (from V3 or "unknown")
     for row in rows:
         assert hasattr(row, "spec_code"), "Row missing spec_code"
@@ -166,8 +172,8 @@ def test_build_lighting_boq_uses_v3_spec_code():
 def test_build_lighting_boq_persists_to_boq_items_table():
     """Lighting BOQ rows must land in boq_items with discipline=lighting
     and the new spec_code/loop_id columns populated."""
-    symbols, rooms, specs, zones = _load_all()
-    rows = build_lighting_boq(symbols, rooms, specs, zones)
+    symbols, rooms, specs, zones, allocation_report = _load_all()
+    rows = build_lighting_boq(symbols, rooms, specs, zones, allocation_report)
     assert len(rows) > 0
     insp = inspect(get_engine())
     cols = {c["name"] for c in insp.get_columns("boq_items")}
